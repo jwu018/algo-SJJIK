@@ -17,7 +17,7 @@ random.seed(seed)
 freq = 256
 window = 1
 overlap = 0.15
-data_path = r"C:\Users\inesh\Downloads\EEG Data\flat_bdf_files"
+data_path = # Add file path
 
 # read EEGs
 def loadEEG(path, return_label=False):
@@ -106,3 +106,4 @@ Final_Dataloader = DataLoader(
 for X in Final_Dataloader:
     print(X.shape)
     break
+
