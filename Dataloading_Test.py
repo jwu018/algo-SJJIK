@@ -17,11 +17,11 @@ random.seed(seed)
 freq = 256
 window = 1
 overlap = 0.15
-data_path = # Add file path
+data_path = # data path here
 
 # read EEGs
 def loadEEG(path, return_label=False):
-    raw = mne.io.read_raw_bdf(path, preload=True)
+    raw = mne.io.read_raw_edf(path, preload=True)
     data = raw.get_data()
     
     # Extract label from filename
@@ -47,7 +47,7 @@ num_partitions = dl.get_eeg_partition_number(
     freq,
     window,
     overlap,
-    file_format='*.bdf',
+    file_format='*.edf',
     load_function=loadEEG,
     optional_load_fun_args=[False],
     transform_function=transformEEG
@@ -106,4 +106,3 @@ Final_Dataloader = DataLoader(
 for X in Final_Dataloader:
     print(X.shape)
     break
-
