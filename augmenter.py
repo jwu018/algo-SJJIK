@@ -3,7 +3,7 @@ import sys
 import random
 from selfeeg import augmentation as aug
 import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import torch
 
 #seed = 11
@@ -16,7 +16,7 @@ import torch
 
 #Creating sample EEG to create Augmenter
 Fs = 128
-SampleBatchEEG = torch.zeros(16,32,1024) + torch.sin(torch.linspace(0, 8*np.pi,1024))
+#SampleBatchEEG = torch.zeros(16,32,1024) + torch.sin(torch.linspace(0, 8*np.pi,1024))
 
 #Phase 1 Augmentations
 augBandNoise = aug.DynamicSingleAug(aug.add_band_noise, 
@@ -63,12 +63,13 @@ Phase3 = aug.RandomAug(augSame, augFlip, p=[.75, .25])
 Augmenter = aug.SequentialAug(Phase1, Phase2, Phase3)
 
 #Implementing Augmentations onto Sample EEG
-AugmentedBatchEEG = Augmenter(SampleBatchEEG)
+#AugmentedBatchEEG = Augmenter(SampleBatchEEG)
 
 
-plt.plot(SampleBatchEEG[0,0],linewidth=2.5)
-plt.plot(AugmentedBatchEEG[0,0])
-plt.tick_params(axis='both', which='major', labelsize=12)
-plt.title('Augmentation Visualized', fontsize=15)
-plt.legend(['original sample', 'augmented sample'])
-plt.show()
+#plt.plot(SampleBatchEEG[0,0],linewidth=2.5)
+#plt.plot(AugmentedBatchEEG[0,0])
+#plt.tick_params(axis='both', which='major', labelsize=12)
+#plt.title('Augmentation Visualized', fontsize=15)
+#plt.legend(['original sample', 'augmented sample'])
+
+#plt.show()
