@@ -14,7 +14,7 @@ np.random.seed(seed)
 random.seed(seed)
 
 # partition data
-freq = 256
+freq = 250
 window = 1
 overlap = 0.15
 data_path = # data path here
@@ -132,3 +132,4 @@ for X in train_Dataloader:
 for X in val_Dataloader:
     print(X.shape)
     break
+
