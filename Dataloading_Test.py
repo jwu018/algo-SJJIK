@@ -78,8 +78,8 @@ print("EEGsplit columns:", EEGsplit.columns.tolist() if hasattr(EEGsplit, 'colum
 print("EEGsplit head:")
 print(EEGsplit.head() if hasattr(EEGsplit, 'head') else EEGsplit)
 
-# ​​ Create Dataset
-dataset = dl.EEGDataset(
+# ​​ Create Training Dataset
+train_dataset = dl.EEGDataset(
     num_partitions,
     EEGsplit,
     [freq, window, overlap],
@@ -87,22 +87,48 @@ dataset = dl.EEGDataset(
     load_function = loadEEG,
     transform_function = transformEEG
 )
-# get first sample 
-sample_1 = dataset[0]
-print(sample_1.shape)
 
-# create a basic sampler
-sampler_linear = dl.EEGSampler(dataset, Mode=0)
+# Create Validation Dataset
+val_dataset = dl.EEGDataset(
+    num_partitions,
+    EEGsplit,
+    [freq, window, overlap],
+    mode = 'validation',
+    load_function = loadEEG,
+    transform_function = transformEEG
+)
+
+# get first sample 
+# train_sample_1 = train_dataset[0]
+# print(train_sample_1.shape)
+
+# val_sample_1 = val_dataset[0]
+# print(val_sample_1.shape)
+
+# create samplers
+train_sampler = dl.EEGSampler(train_dataset, Mode=0)
+val_sampler = dl.EEGSampler(val_dataset, Mode=0)
 
 # create the dataloader
-Final_Dataloader = DataLoader(
-    dataset = dataset,
+train_Dataloader = DataLoader(
+    dataset = train_dataset,
     batch_size = 16,
-    sampler = sampler_linear,
+    sampler = train_sampler,
+    num_workers = 0
+)
+
+val_Dataloader = DataLoader(
+    dataset = val_dataset,
+    batch_size = 16,
+    sampler = val_sampler,
     num_workers = 0
 )
 
 # test
-for X in Final_Dataloader:
+for X in train_Dataloader:
+    print(X.shape)
+    break
+
+for X in val_Dataloader:
     print(X.shape)
     break
