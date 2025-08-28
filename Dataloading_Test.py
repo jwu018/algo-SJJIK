@@ -6,6 +6,33 @@ import torch
 from torch.utils.data import DataLoader
 from selfeeg import dataloading as dl
 import mne
+import shutil
+
+#takes out all the .edf files
+root_folder = r"..\000"
+
+destination = r"..\000_collected"
+
+os.makedirs(destination, exist_ok=True)
+
+for dirpath, dirnames, filenames in os.walk(root_folder):
+    for filename in filenames:
+        # Example: only copy certain file types
+        if filename.endswith(".edf"):
+            full_path = os.path.join(dirpath, filename)
+            dest_path = os.path.join(destination, filename)
+
+            # If you want to preserve uniqueness, handle duplicates
+            if os.path.exists(dest_path):
+                base, ext = os.path.splitext(filename)
+                counter = 1
+                while os.path.exists(dest_path):
+                    dest_path = os.path.join(destination, f"{base}_{counter}{ext}")
+                    counter += 1
+
+            shutil.copy2(full_path, dest_path)
+            print(f"Copied {full_path} -> {dest_path}")
+
 
 # seed
 seed = 12
@@ -17,7 +44,7 @@ random.seed(seed)
 freq = 250
 window = 1
 overlap = 0.15
-data_path = # data path here
+data_path = destination# data path here
 
 # read EEGs
 def loadEEG(path, return_label=False):
@@ -124,12 +151,12 @@ val_Dataloader = DataLoader(
     num_workers = 0
 )
 
-# test
-for X in train_Dataloader:
-    print(X.shape)
-    break
-
-for X in val_Dataloader:
-    print(X.shape)
-    break
-
+# # test
+# for X in train_Dataloader:
+#     print(X.shape)
+#     break
+#
+# for X in val_Dataloader:
+#     print(X.shape)
+#     break
+#
