@@ -64,7 +64,16 @@ def loadEEG(path, return_label=False):
 
 # idk
 def transformEEG(EEG):
-    EEG = EEG[:,:-64]
+    n_channels = EEG.shape[0]
+    
+    if n_channels >= 32:
+        EEG = EEG[:32, :]
+    else:
+        # If we have fewer than 32 channels, pad with zeros
+        padded_EEG = np.zeros((32, EEG.shape[1]))
+        padded_EEG[:n_channels, :] = EEG
+        EEG = padded_EEG
+    
     return EEG
 
 # ​​ Number of partitions
@@ -160,3 +169,4 @@ val_Dataloader = DataLoader(
 #     print(X.shape)
 #     break
 #
+
