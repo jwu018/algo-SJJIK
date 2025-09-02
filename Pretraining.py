@@ -93,3 +93,60 @@ loss_info = SelfMdl.fit(
     return_loss_info      = True
 )
 
+#defines the backbone and then sets the pretrained encoder onto the final model
+FinalMdl = TransformEEG(nb_classes=2, Chan=32, Samples = , F = )
+SelfMdl.train()
+SelfMdl.to(device='cpu')
+FinalMdl.encoder = SelfMdl.get_encoder()
+FinalMdl.train()
+FinalMdl.to(device=device)
+
+#defines the loss function
+def loss_fineTuning(yhat, ytrue):
+    ytrue = ytrue + 0.
+    yhat = torch.squeeze(yhat)
+    return F.binary_cross_entropy_with_logits(yhat, ytrue)
+
+#defining the early stop for making sure not to overfit
+earlystopFT = selfeeg.ssl.EarlyStopping(
+    patience=10, min_delta=1e-03, record_best_weights=True)
+
+#sets the optimizer and the lr scheduler
+optimizerFT = torch.optim.Adam(FinalMdl.parameters(), lr=1e-3)
+schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.97)
+
+finetuning_loss=selfeeg.ssl.fine_tune(
+    model                 = FinalMdl,
+    train_dataloader      = trainloaderFT, # for when dataloader is set
+    epochs                = 10,
+    optimizer             = optimizerFT,
+    loss_func             = loss_fineTuning,
+    lr_scheduler          = schedulerFT,
+    EarlyStopper          = earlystopFT,
+    validation_dataloader = valloaderFT, # for when dataloader is set
+    verbose               = True,
+    device                = device,
+    return_loss_info      = True
+)
+
+#saves the finalized model after training
+torch.save(FinalMdl.state_dict(), "finetuned_model.pth")
+
+
+#evaluating the final model code
+from sklearn.metrics import classification_report
+nb_classes=2
+FinalMdl.eval()
+ytrue=torch.zeros(len(testloaderFT.dataset))
+ypred=torch.zeros_like(ytrue)
+cnt=0
+for i, (X, Y) in enumerate(testloaderFT):
+    X=X.to(device=device)
+    ytrue[cnt:cnt+X.shape[0]]= Y
+    with torch.no_grad():
+        yhat = torch.sigmoid(FinalMdl(X)).to(device='cpu')
+        ypred[cnt:cnt+X.shape[0]] = torch.squeeze(yhat)
+    cnt += X.shape[0]
+
+print('Results of trivial Example\n')
+print(classification_report(ytrue,ypred>0.5))
