@@ -15,7 +15,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-#set seed to 12
 
 class TransformEEGEncoder(nn.Module):
     def __init__(self, original_model):
@@ -45,8 +44,8 @@ class TransformEEGEncoder(nn.Module):
 
 from models import TransformEEG
 from TF_augmenter_fix import Augmenter
-from Dataloading_Test import train_Dataloader
-from Dataloading_Test import val_Dataloader
+from Dataloading_Test import train_Dataloader, val_Dataloader
+from Dataloading_Test import trainloaderFT, valloaderFT, testloaderFT
 
 # Initialize full model
 baseline = TransformEEG(nb_classes=2, Chan=32, Features=128)
@@ -81,7 +80,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
 loss_info = SelfMdl.fit(
     train_dataloader      = train_Dataloader,
     augmenter             = Augmenter(),
-    epochs                = 5,
+    epochs                = 100,
     optimizer             = optimizer,
     loss_func             = loss,
     loss_args             = loss_arg,
@@ -94,7 +93,7 @@ loss_info = SelfMdl.fit(
 )
 
 #defines the backbone and then sets the pretrained encoder onto the final model
-FinalMdl = TransformEEG(nb_classes=2, Chan=32, Samples = , F = )
+FinalMdl = TransformEEG(nb_classes=2, Chan=32, Features=128)
 SelfMdl.train()
 SelfMdl.to(device='cpu')
 FinalMdl.encoder = SelfMdl.get_encoder()
@@ -118,7 +117,7 @@ schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.97)
 finetuning_loss=selfeeg.ssl.fine_tune(
     model                 = FinalMdl,
     train_dataloader      = trainloaderFT, # for when dataloader is set
-    epochs                = 10,
+    epochs                = 15,
     optimizer             = optimizerFT,
     loss_func             = loss_fineTuning,
     lr_scheduler          = schedulerFT,
