@@ -47,8 +47,10 @@ from TF_augmenter_fix import Augmenter
 from Dataloading_Test import train_Dataloader, val_Dataloader
 from Dataloading_Test import trainloaderFT, valloaderFT, testloaderFT
 
+#in paper, dataloading has 125 and 250 Hz supported and 16s windows and 0.25 overlap and batch size is 64
+
 # Initialize full model
-baseline = TransformEEG(nb_classes=2, Chan=32, Features=128)
+baseline = TransformEEG(nb_classes=2, Chan=32, Features=128) #paper has 61 channels
 ssl_backbone = TransformEEG(nb_classes=2, Chan=32, Features=128)
 # Wrap encoder
 encoder = TransformEEGEncoder(ssl_backbone)
@@ -80,7 +82,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
 loss_info = SelfMdl.fit(
     train_dataloader      = train_Dataloader,
     augmenter             = Augmenter(),
-    epochs                = 100,
+    epochs                = 100, #paper has 300
     optimizer             = optimizer,
     loss_func             = loss,
     loss_args             = loss_arg,
@@ -108,11 +110,11 @@ def loss_fineTuning(yhat, ytrue):
 
 #defining the early stop for making sure not to overfit
 earlystopFT = selfeeg.ssl.EarlyStopping(
-    patience=10, min_delta=1e-03, record_best_weights=True)
+    patience=10, min_delta=1e-03, record_best_weights=True) #paper has patience 20 and min_delta 1e-04
 
 #sets the optimizer and the lr scheduler
-optimizerFT = torch.optim.Adam(FinalMdl.parameters(), lr=1e-3)
-schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.97)
+optimizerFT = torch.optim.Adam(FinalMdl.parameters(), lr=1e-3) #has a lr of 2.5e-5 and also beta1=0.75 while we have 0.9
+schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.97) #paper has gamma of 0.99
 
 finetuning_loss=selfeeg.ssl.fine_tune(
     model                 = FinalMdl,
@@ -146,6 +148,13 @@ for i, (X, Y) in enumerate(testloaderFT):
         yhat = torch.sigmoid(FinalMdl(X)).to(device='cpu')
         ypred[cnt:cnt+X.shape[0]] = torch.squeeze(yhat)
     cnt += X.shape[0]
+
+
+# paper's evaulation
+#    - Window-level performance at 0.5 threshold and ROC-corrected threshold.
+#    - Subject-level aggregation using a learned “win ratio” threshold derived from validation.
+#    - Extensive saving of results and model checkpoints per-fold.
+#
 
 print('Results of trivial Example\n')
 print(classification_report(ytrue,ypred>0.5))
