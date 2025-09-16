@@ -3,8 +3,11 @@ import os
 import random
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from selfeeg import dataloading as dl
+import selfeeg
+import selfeeg.dataloading as dl
 import mne
 import shutil
 
@@ -35,7 +38,7 @@ for dirpath, dirnames, filenames in os.walk(root_folder):
 
 
 # seed
-seed = 12
+seed = 42
 torch.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
@@ -44,6 +47,8 @@ random.seed(seed)
 freq = 250
 window = 1
 overlap = 0.15
+batchsize = 64
+workers = 0
 data_path = destination# data path here
 
 # read EEGs
@@ -64,7 +69,16 @@ def loadEEG(path, return_label=False):
 
 # idk
 def transformEEG(EEG):
-    EEG = EEG[:,:-64]
+    n_channels = EEG.shape[0]
+    
+    if n_channels >= 32:
+        EEG = EEG[:32, :]
+    else:
+        # If we have fewer than 32 channels, pad with zeros
+        padded_EEG = np.zeros((32, EEG.shape[1]))
+        padded_EEG[:n_channels, :] = EEG
+        EEG = padded_EEG
+    
     return EEG
 
 # ​​ Number of partitions
@@ -139,14 +153,14 @@ val_sampler = dl.EEGSampler(val_dataset, Mode=0)
 # create the dataloader
 train_Dataloader = DataLoader(
     dataset = train_dataset,
-    batch_size = 16,
+    batch_size = batchsize,
     sampler = train_sampler,
     num_workers = 0
 )
 
 val_Dataloader = DataLoader(
     dataset = val_dataset,
-    batch_size = 16,
+    batch_size = batchsize,
     sampler = val_sampler,
     num_workers = 0
 )
@@ -160,3 +174,62 @@ val_Dataloader = DataLoader(
 #     print(X.shape)
 #     break
 #
+
+# FINETUNING CODE
+
+# Extract a subset of training data for fine-tuning
+filesFT = EEGsplit.loc[EEGsplit['split_set']==0, 'file_name'].values
+EEGlenFT = num_partitions.loc[num_partitions['file_name'].isin(filesFT)]
+EEGlenFT = EEGlenFT.reset_index().drop(columns=['index'])
+
+def extract_labels_from_files(file_list, data_path):
+    labels = []
+    for file in file_list:
+        full_path = os.path.join(data_path, file)
+        try:
+            _, label = loadEEG(full_path, return_label=True)
+            labels.append(label)
+        except Exception as e:
+            labels.append(0)
+    return np.array(labels)
+
+# Extract labels for the finetuning files
+labels = extract_labels_from_files(filesFT, data_path)
+
+EEGsplitFT = dl.get_eeg_split_table(
+    partition_table=EEGlenFT,
+    test_ratio = 0.2,
+    val_ratio= 0.1,
+    val_ratio_on_all_data=False,
+    stratified=True,
+    labels=labels,
+    split_tolerance=0.001,
+    perseverance=10000,
+    seed=seed
+)
+
+# TRAINING DATALOADER
+trainsetFT = dl.EEGDataset(
+    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train', supervised=True,
+    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+)
+trainsamplerFT = dl.EEGSampler(trainsetFT, batchsize, workers)
+trainloaderFT = DataLoader(
+    dataset = trainsetFT, batch_size= batchsize, sampler=trainsamplerFT, num_workers=workers)
+
+# VALIDATION DATALOADER
+valsetFT = dl.EEGDataset(
+    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation', supervised=True,
+    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+)
+valloaderFT = DataLoader(
+    dataset=valsetFT, batch_size=batchsize, num_workers=workers, shuffle=False)
+
+#TEST DATALOADER
+testsetFT = dl.EEGDataset(
+    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test', supervised=True,
+    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+)
+testloaderFT = DataLoader(dataset = testsetFT, batch_size= batchsize, shuffle=False)
+
+dl.check_split(EEGlenFT, EEGsplitFT, labels)
