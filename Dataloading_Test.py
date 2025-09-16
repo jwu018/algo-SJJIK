@@ -38,7 +38,7 @@ for dirpath, dirnames, filenames in os.walk(root_folder):
 
 
 # seed
-seed = 12
+seed = 42
 torch.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
@@ -47,7 +47,7 @@ random.seed(seed)
 freq = 250
 window = 1
 overlap = 0.15
-batchsize = 16
+batchsize = 64
 workers = 0
 data_path = destination# data path here
 
@@ -153,14 +153,14 @@ val_sampler = dl.EEGSampler(val_dataset, Mode=0)
 # create the dataloader
 train_Dataloader = DataLoader(
     dataset = train_dataset,
-    batch_size = 16,
+    batch_size = batchsize,
     sampler = train_sampler,
     num_workers = 0
 )
 
 val_Dataloader = DataLoader(
     dataset = val_dataset,
-    batch_size = 16,
+    batch_size = batchsize,
     sampler = val_sampler,
     num_workers = 0
 )
