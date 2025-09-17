@@ -1,90 +1,88 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+import mne
+import io
+import s3fs
 
-# -----------------------------
-# Augmentation functions (batch-aware)
-# -----------------------------
+# -------------------------------------
+# S3 filesystem
+# -------------------------------------
+fs = s3fs.S3FileSystem(anon=False)
 
-def trial_averaging(x1, x2):
-    # x1, x2: [B, C, T]
-    return (x1 + x2) / 2
-
-def time_slice_mix(x1, x2, num_slices=4):
-    # x1, x2: [B, C, T]
-    B, C, T = x1.shape
-    slice_len = T // num_slices
-    x_new = x1.clone()
-
-    for i in range(num_slices):
-        start = i * slice_len
-        end = T if i == num_slices - 1 else (i + 1) * slice_len
-        # random swap mask for each sample in batch
-        swap_mask = (torch.rand(B, 1, 1, device=x1.device) < 0.5)
-        x_new[:, :, start:end] = torch.where(
-            swap_mask, x2[:, :, start:end], x_new[:, :, start:end]
-        )
-    return x_new
-
-def frequency_mix(x1, x2, alpha=0.5):
-    # x1, x2: [B, C, T]
-    X1 = torch.fft.fft(x1, dim=-1)
-    X2 = torch.fft.fft(x2, dim=-1)
-    X_new = alpha * X1 + (1 - alpha) * X2
-    x_new = torch.fft.ifft(X_new, dim=-1).real
-    return x_new
-
-def random_crop(x, crop_ratio=0.8):
-    # x: [B, C, T]
-    B, C, T = x.shape
-    crop_len = int(T * crop_ratio)
-    x_out = torch.zeros_like(x)
-
-    for b in range(B):
-        start = torch.randint(0, T - crop_len + 1, (1,)).item()
-        segment = x[b, :, start:start+crop_len]
-        # resize back to original T
-        segment_resized = F.interpolate(
-            segment.unsqueeze(0), size=T, mode="linear", align_corners=False
-        )
-        x_out[b] = segment_resized.squeeze(0)
-
-    return x_out
-
-# -----------------------------
-# Augmenter class
-# -----------------------------
-
-class Augmenter(nn.Module):
-    def __init__(self, use_trial_avg=True, use_time_mix=True, use_freq_mix=True, use_crop=True, p=0.5):
-        super().__init__()
-        self.use_trial_avg = use_trial_avg
-        self.use_time_mix = use_time_mix
-        self.use_freq_mix = use_freq_mix
-        self.use_crop = use_crop
-        self.p = p  # probability of applying each augmentation
-
-    def forward(self, x, x_alt=None):
+# -------------------------------------
+# EEG Dataset for SSL pretraining
+# -------------------------------------
+class EEGDatasetS3(Dataset):
+    def __init__(self, s3_paths, window_size=16, sfreq=250, overlap=0.25, transform=None):
         """
-        x: [B, C, T] batch of EEG trials
-        x_alt: [B, C, T] optional second batch (same shape) for mix-based augmentations
+        Args:
+            s3_paths (list): list of full S3 paths to EDF files
+            window_size (int): in seconds
+            sfreq (int): sampling frequency
+            overlap (float): fractional overlap (0.25 = 25%)
+            transform: optional transform (Augmenter)
         """
-        # 1) Trial averaging
-        if self.use_trial_avg and x_alt is not None and torch.rand(1) < self.p:
-            x = trial_averaging(x, x_alt)
+        self.s3_paths = s3_paths
+        self.window_size = window_size
+        self.sfreq = sfreq
+        self.overlap = overlap
+        self.transform = transform
 
-        # 2) Time slice mixing
-        if self.use_time_mix and x_alt is not None and torch.rand(1) < self.p:
-            x = time_slice_mix(x, x_alt)
+        self.samples = []  # [(file_idx, start_sample, stop_sample), ...]
 
-        # 3) Frequency domain mixing
-        if self.use_freq_mix and x_alt is not None and torch.rand(1) < self.p:
-            x = frequency_mix(x, x_alt)
+        win_len = int(window_size * sfreq)
+        step = int(win_len * (1 - overlap))
 
-        # 4) Random cropping
-        if self.use_crop and torch.rand(1) < self.p:
-            x = random_crop(x)
+        # Precompute all window indices
+        for file_idx, path in enumerate(s3_paths):
+            with fs.open(path, 'rb') as f:
+                raw = mne.io.read_raw_edf(io.BytesIO(f.read()), preload=False)
+                n_samples = raw.n_times
 
-        return x
+            for start in range(0, n_samples - win_len, step):
+                stop = start + win_len
+                self.samples.append((file_idx, start, stop))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        file_idx, start, stop = self.samples[idx]
+        s3_path = self.s3_paths[file_idx]
+
+        # Load EDF from S3
+        with fs.open(s3_path, 'rb') as f:
+            raw = mne.io.read_raw_edf(io.BytesIO(f.read()), preload=True)
+            data, _ = raw[:, start:stop]  # shape (C, T)
+
+        x = torch.tensor(data, dtype=torch.float32)
+
+        # Apply Augmenter (expects [B, C, T])
+        if self.transform:
+            x = self.transform(x.unsqueeze(0)).squeeze(0)
+
+        return x  # returns (C, T)
+
+# -------------------------------------
+# Helper to build DataLoaders
+# -------------------------------------
+def get_ssl_dataloaders(bucket_name, window_size=16, sfreq=250, overlap=0.25, batch_size=64, augmenter=None):
+    # List S3 files
+    train_files = fs.ls(f"{bucket_name}/train")
+    val_files   = fs.ls(f"{bucket_name}/val")
+    test_files  = fs.ls(f"{bucket_name}/test")
+
+    # Create Datasets
+    train_dataset = EEGDatasetS3(train_files, window_size, sfreq, overlap, transform=augmenter)
+    val_dataset   = EEGDatasetS3(val_files,   window_size, sfreq, overlap, transform=None)  # usually no augmentation for val
+    test_dataset  = EEGDatasetS3(test_files,  window_size, sfreq, overlap, transform=None)
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader   = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    test_loader  = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    return train_loader, val_loader, test_loader
+
 
 
