@@ -139,7 +139,8 @@ scores = {}
 scores['loss_progression'] = finetuning_loss
 verbose = False # double check if we want this
 class_labels = [] # check in for
-# Evaluate model on the window level with the standard 0.5 threshold
+#- turn model probabilities/logits into decisions using a threshold. You can use a fixed 0.5 or pick a better one based on validation via ROC-driven selection.
+# Evaluate model on the window level with the standard 0.5 threshold - - You classify as positive if score > 0.5,
 scores['th_standard'] = get_performances(
         loader2eval    = testloaderFT,
         Model          = FinalMdl,
@@ -156,6 +157,9 @@ scores['th_standard'] = get_performances(
     #if not verbose:
 bal_acc = scores['th_standard']['accuracy_weighted']
 print(f'Balanced accuracy on windows with threshold 0.500 --> {bal_acc:.7f}')
+
+#- You find the “best” decision threshold on the validation set (e.g., the threshold that maximizes balanced accuracy or Youden’s J from the ROC curve).
+# Then you fix that threshold and evaluate on the test set -  always better than 0.5
 
     # Evalutate the model on the window level with a roc corrected threshold
 th_eval = get_performances(
@@ -189,6 +193,25 @@ if not verbose:
     print(f'Balanced accuracy on windows with threshold {th:.3f} --> {bal_acc_roc:.3f}')
 
 # Evalutate the model on the subject level
+#Maybe take out the subject level on 0.5 threshold
+# for window vs subject: - Window-level evaluation: How well the model classifies individual windows/segments.
+# - Subject-level evaluation: How well the model decides the final label for a subject by aggregating its windows.
+# - the clinical/real label is per subject. Window-level is a proxy.
+#The first is on a 0.5 window while second is ROC- optimized
+#Metrics to maybe report:
+#- Window-level:
+#     - AUC (threshold-independent) to show discriminative ability.
+#     - Balanced accuracy, sensitivity, specificity at:
+#         - threshold = 0.5
+#         - ROC-tuned threshold (selected on validation), including the numeric threshold used
+#
+# - Subject-level:
+#     - Balanced accuracy, sensitivity, specificity using:
+#         - ratio threshold learned on validation (report the ratio value)
+#         - combined with the ROC-tuned window threshold (recommended primary)
+#
+# - Consider reporting confidence intervals (bootstrap over subjects) for subject-level metrics.
+
 subject_labeler = WinRatio()
 subject_labeler.add_data(valloaderFT, FinalMdl, device='cpu', th = 0.5)
 subject_labeler.compute_ratio()
@@ -235,7 +258,7 @@ if not verbose:
     print("using the following threshold for subject predictions", subject_thresh)
     print(f'Balanced accuracy on subject with roc & th  {th:.3f} --> {bal_acc_sub_roc:.3f}')
 
-#evaluating the final model code
+#evaluating - code from selfeeg
 # from sklearn.metrics import classification_report
 # nb_classes=2
 # FinalMdl.eval()
