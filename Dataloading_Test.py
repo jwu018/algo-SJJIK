@@ -1,103 +1,90 @@
-# imports
 import os
 import random
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-import selfeeg
 import selfeeg.dataloading as dl
 import mne
-import shutil
+import s3fs
+import io
 
-#takes out all the .edf files
-root_folder = r"..\000"
+# -----------------------------
+# S3 Setup
+# -----------------------------
+fs = s3fs.S3FileSystem(anon=False)
+bucket_name = "your-bucket-name"
 
-destination = r"..\000_collected"
+train_prefix = f"s3://{bucket_name}/train/"
+val_prefix   = f"s3://{bucket_name}/val/"
+test_prefix  = f"s3://{bucket_name}/test/"
 
-os.makedirs(destination, exist_ok=True)
+# List all files in each split
+train_files = fs.ls(train_prefix)
+val_files   = fs.ls(val_prefix)
+test_files  = fs.ls(test_prefix)
 
-for dirpath, dirnames, filenames in os.walk(root_folder):
-    for filename in filenames:
-        # Example: only copy certain file types
-        if filename.endswith(".edf"):
-            full_path = os.path.join(dirpath, filename)
-            dest_path = os.path.join(destination, filename)
+# Combine all files for num_partitions table
+all_files = train_files + val_files + test_files
 
-            # If you want to preserve uniqueness, handle duplicates
-            if os.path.exists(dest_path):
-                base, ext = os.path.splitext(filename)
-                counter = 1
-                while os.path.exists(dest_path):
-                    dest_path = os.path.join(destination, f"{base}_{counter}{ext}")
-                    counter += 1
-
-            shutil.copy2(full_path, dest_path)
-            print(f"Copied {full_path} -> {dest_path}")
-
-
-# seed
+# -----------------------------
+# Seed
+# -----------------------------
 seed = 42
 torch.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
 
-# partition data
+# -----------------------------
+# Parameters
+# -----------------------------
 freq = 250
-window = 1
+window = 1       # in seconds, adjust as needed
 overlap = 0.15
 batchsize = 64
 workers = 0
-data_path = destination# data path here
 
-# read EEGs
-def loadEEG(path, return_label=False):
-    raw = mne.io.read_raw_edf(path, preload=True)
-    data = raw.get_data()
-    
-    # Extract label from filename
-    if 'pd' in os.path.basename(path).lower():
-        label = 1
-    else:
-        label = 0
-    
+# -----------------------------
+# EDF loader from S3
+# -----------------------------
+def loadEEG_S3(s3_path, return_label=False):
+    with fs.open(s3_path, 'rb') as f:
+        raw = mne.io.read_raw_edf(io.BytesIO(f.read()), preload=True)
+        data = raw.get_data()
     if return_label:
+        label = 1 if 'pd' in os.path.basename(s3_path).lower() else 0
         return data, label
-    else:
-        return data
+    return data
 
-# idk
+# -----------------------------
+# Transform function (same as before)
+# -----------------------------
 def transformEEG(EEG):
     n_channels = EEG.shape[0]
-    
     if n_channels >= 32:
         EEG = EEG[:32, :]
     else:
-        # If we have fewer than 32 channels, pad with zeros
         padded_EEG = np.zeros((32, EEG.shape[1]))
         padded_EEG[:n_channels, :] = EEG
         EEG = padded_EEG
-    
     return EEG
 
-# ​​ Number of partitions
-
+# -----------------------------
+# Partition table
+# -----------------------------
 num_partitions = dl.get_eeg_partition_number(
-    data_path,
+    all_files,
     freq,
     window,
     overlap,
     file_format='*.edf',
-    load_function=loadEEG,
+    load_function=loadEEG_S3,
     optional_load_fun_args=[False],
     transform_function=transformEEG
 )
 print(f"Number of partitions available: {num_partitions}")
 
-num_partitions.head()
-
-# ​​ Split data
+# -----------------------------
+# Split data table
+# -----------------------------
 EEGsplit = dl.get_eeg_split_table(
     num_partitions,
     test_ratio=0.1,
@@ -106,100 +93,77 @@ EEGsplit = dl.get_eeg_split_table(
     val_split_mode='file',
     exclude_data_id=None,
     stratified=False,
-    perseverance = 5000,
-    split_tolerance = 0.005,
-    seed = seed
+    perseverance=5000,
+    split_tolerance=0.005,
+    seed=seed
 )
 dl.check_split(num_partitions, EEGsplit)
 
-# Check what EEGsplit actually contains
-print("EEGsplit type:", type(EEGsplit))
-print("EEGsplit shape:", EEGsplit.shape if hasattr(EEGsplit, 'shape') else "No shape")
-print("EEGsplit columns:", EEGsplit.columns.tolist() if hasattr(EEGsplit, 'columns') else "No columns")
-print("EEGsplit head:")
-print(EEGsplit.head() if hasattr(EEGsplit, 'head') else EEGsplit)
-
-# ​​ Create Training Dataset
+# -----------------------------
+# Create Datasets
+# -----------------------------
 train_dataset = dl.EEGDataset(
     num_partitions,
     EEGsplit,
     [freq, window, overlap],
-    mode = 'train',
-    load_function = loadEEG,
-    transform_function = transformEEG
+    mode='train',
+    load_function=loadEEG_S3,
+    transform_function=transformEEG
 )
 
-# Create Validation Dataset
 val_dataset = dl.EEGDataset(
     num_partitions,
     EEGsplit,
     [freq, window, overlap],
-    mode = 'validation',
-    load_function = loadEEG,
-    transform_function = transformEEG
+    mode='validation',
+    load_function=loadEEG_S3,
+    transform_function=transformEEG
 )
 
-# get first sample 
-# train_sample_1 = train_dataset[0]
-# print(train_sample_1.shape)
-
-# val_sample_1 = val_dataset[0]
-# print(val_sample_1.shape)
-
-# create samplers
+# -----------------------------
+# Samplers & DataLoaders
+# -----------------------------
 train_sampler = dl.EEGSampler(train_dataset, Mode=0)
-val_sampler = dl.EEGSampler(val_dataset, Mode=0)
+val_sampler   = dl.EEGSampler(val_dataset, Mode=0)
 
-# create the dataloader
-train_Dataloader = DataLoader(
-    dataset = train_dataset,
-    batch_size = batchsize,
-    sampler = train_sampler,
-    num_workers = 0
+train_Dataloader = torch.utils.data.DataLoader(
+    dataset=train_dataset,
+    batch_size=batchsize,
+    sampler=train_sampler,
+    num_workers=workers
 )
 
-val_Dataloader = DataLoader(
-    dataset = val_dataset,
-    batch_size = batchsize,
-    sampler = val_sampler,
-    num_workers = 0
+val_Dataloader = torch.utils.data.DataLoader(
+    dataset=val_dataset,
+    batch_size=batchsize,
+    sampler=val_sampler,
+    num_workers=workers
 )
 
-# # test
-# for X in train_Dataloader:
-#     print(X.shape)
-#     break
-#
-# for X in val_Dataloader:
-#     print(X.shape)
-#     break
-#
-
-# FINETUNING CODE
-
-# Extract a subset of training data for fine-tuning
-filesFT = EEGsplit.loc[EEGsplit['split_set']==0, 'file_name'].values
+# -----------------------------
+# Fine-tuning subset (example)
+# -----------------------------
+# extract FT subset
+filesFT = EEGsplit.loc[EEGsplit['split_set'] == 0, 'file_name'].values
 EEGlenFT = num_partitions.loc[num_partitions['file_name'].isin(filesFT)]
 EEGlenFT = EEGlenFT.reset_index().drop(columns=['index'])
 
-def extract_labels_from_files(file_list, data_path):
+def extract_labels_from_files(file_list):
     labels = []
     for file in file_list:
-        full_path = os.path.join(data_path, file)
         try:
-            _, label = loadEEG(full_path, return_label=True)
+            _, label = loadEEG_S3(file, return_label=True)
             labels.append(label)
         except Exception as e:
             labels.append(0)
     return np.array(labels)
 
-# Extract labels for the finetuning files
-labels = extract_labels_from_files(filesFT, data_path)
+labels = extract_labels_from_files(filesFT)
 
 EEGsplitFT = dl.get_eeg_split_table(
     partition_table=EEGlenFT,
-    test_ratio = 0.2,
-    val_ratio= 0.1,
+    test_ratio=0.2,
+    val_ratio=0.1,
     val_ratio_on_all_data=False,
     stratified=True,
     labels=labels,
@@ -208,28 +172,35 @@ EEGsplitFT = dl.get_eeg_split_table(
     seed=seed
 )
 
-# TRAINING DATALOADER
+# FT datasets
 trainsetFT = dl.EEGDataset(
-    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+    EEGlenFT, EEGsplitFT, [freq, window, overlap],
+    'train', supervised=True, label_on_load=True,
+    load_function=loadEEG_S3, optional_load_fun_args=[True]
 )
 trainsamplerFT = dl.EEGSampler(trainsetFT, batchsize, workers)
-trainloaderFT = DataLoader(
-    dataset = trainsetFT, batch_size= batchsize, sampler=trainsamplerFT, num_workers=workers)
+trainloaderFT = torch.utils.data.DataLoader(
+    dataset=trainsetFT, batch_size=batchsize,
+    sampler=trainsamplerFT, num_workers=workers
+)
 
-# VALIDATION DATALOADER
 valsetFT = dl.EEGDataset(
-    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+    EEGlenFT, EEGsplitFT, [freq, window, overlap],
+    'validation', supervised=True, label_on_load=True,
+    load_function=loadEEG_S3, optional_load_fun_args=[True]
 )
-valloaderFT = DataLoader(
-    dataset=valsetFT, batch_size=batchsize, num_workers=workers, shuffle=False)
+valloaderFT = torch.utils.data.DataLoader(
+    dataset=valsetFT, batch_size=batchsize, num_workers=workers,
+    shuffle=False
+)
 
-#TEST DATALOADER
 testsetFT = dl.EEGDataset(
-    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+    EEGlenFT, EEGsplitFT, [freq, window, overlap],
+    'test', supervised=True, label_on_load=True,
+    load_function=loadEEG_S3, optional_load_fun_args=[True]
 )
-testloaderFT = DataLoader(dataset = testsetFT, batch_size= batchsize, shuffle=False)
+testloaderFT = torch.utils.data.DataLoader(
+    dataset=testsetFT, batch_size=batchsize, shuffle=False
+)
 
 dl.check_split(EEGlenFT, EEGsplitFT, labels)
