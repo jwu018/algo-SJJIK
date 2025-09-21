@@ -50,8 +50,8 @@ from Dataloading_Test import trainloaderFT, valloaderFT, testloaderFT
 #in paper, dataloading has 125 and 250 Hz supported and 16s windows and 0.25 overlap and batch size is 64
 
 # Initialize full model
-baseline = TransformEEG(nb_classes=2, Chan=32, Features=128) #paper has 61 channels
-ssl_backbone = TransformEEG(nb_classes=2, Chan=32, Features=128)
+baseline = TransformEEG(nb_classes=2, Chan=61, Features=128) #paper has 61 channels
+ssl_backbone = TransformEEG(nb_classes=2, Chan=61, Features=128)
 # Wrap encoder
 encoder = TransformEEGEncoder(ssl_backbone)
 
@@ -73,16 +73,16 @@ loss_arg={'temperature': 0.5}
 
 # earlystopper
 earlystop = selfeeg.ssl.EarlyStopping(
-    patience=25, min_delta=1e-05, record_best_weights=True)
+    patience=20, min_delta=1e-04, record_best_weights=True)
 # optimizer
-optimizer = torch.optim.Adam(SelfMdl.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(SelfMdl.parameters(), lr=2.5e-5, betas=(0.75,0.999))
 # lr scheduler
-scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
+scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
 
 loss_info = SelfMdl.fit(
     train_dataloader      = train_Dataloader,
     augmenter             = Augmenter(),
-    epochs                = 100, #paper has 300
+    epochs                = 300, #paper has 300
     optimizer             = optimizer,
     loss_func             = loss,
     loss_args             = loss_arg,
@@ -95,17 +95,26 @@ loss_info = SelfMdl.fit(
 )
 
 #defines the backbone and then sets the pretrained encoder onto the final model
-FinalMdl = TransformEEG(nb_classes=2, Chan=32, Features=128)
-SelfMdl.train()
-SelfMdl.to(device='cpu')
-FinalMdl.encoder = SelfMdl.get_encoder()
-FinalMdl.train()
+FinalMdl = TransformEEG(nb_classes=2, Chan=61, Features=128)
+#SelfMdl.train()
+#SelfMdl.to(device='cpu') # device moving necessary or not?
+#FinalMdl.encoder = SelfMdl.get_encoder()
+
+pretrained_encoder = SelfMdl.get_encoder()
 FinalMdl.to(device=device)
+pretrained_encoder.to(device=device)
+
+#loading in weights module-wise
+FinalMdl.token_gen.load_state_dict(pretrained_encoder.token_gen.state_dict())
+FinalMdl.transformer.load_state_dict(pretrained_encoder.transformer.state_dict())
+FinalMdl.pool_lay.load_state_dict(pretrained_encoder.pool_lay.state_dict())
+
+FinalMdl.train()
 
 #defines the loss function
 def loss_fineTuning(yhat, ytrue):
-    ytrue = ytrue + 0.
-    yhat = torch.squeeze(yhat)
+    ytrue = ytrue.float()
+    yhat = torch.squeeze(yhat) #maybe yhat = yhat.view(-1)
     return F.binary_cross_entropy_with_logits(yhat, ytrue)
 
 #defining the early stop for making sure not to overfit
@@ -113,7 +122,7 @@ earlystopFT = selfeeg.ssl.EarlyStopping(
     patience=20, min_delta=1e-04, record_best_weights=True) #paper has patience 20 and min_delta 1e-04
 
 #sets the optimizer and the lr scheduler
-optimizerFT = torch.optim.Adam(FinalMdl.parameters(), lr=2.5e-5) #has a lr of 2.5e-5 and also beta1=0.75 while we have 0.9
+optimizerFT = torch.optim.Adam(FinalMdl.parameters(), lr=2.5e-5, betas=(0.75,0.999)) #has a lr of 2.5e-5 and also beta1=0.75 while we have 0.9
 schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.99) #paper has gamma of 0.99
 
 finetuning_loss=selfeeg.ssl.fine_tune(

@@ -45,8 +45,8 @@ random.seed(seed)
 
 # partition data
 freq = 250
-window = 1
-overlap = 0.15
+window = 16
+overlap = 0.25
 batchsize = 64
 workers = 0
 data_path = destination# data path here
@@ -70,12 +70,13 @@ def loadEEG(path, return_label=False):
 # idk
 def transformEEG(EEG):
     n_channels = EEG.shape[0]
+    Target_Chans = 61
     
-    if n_channels >= 32:
-        EEG = EEG[:32, :]
+    if n_channels >= Target_Chans:
+        EEG = EEG[:Target_Chans, :]
     else:
         # If we have fewer than 32 channels, pad with zeros
-        padded_EEG = np.zeros((32, EEG.shape[1]))
+        padded_EEG = np.zeros((Target_Chans, EEG.shape[1]))
         padded_EEG[:n_channels, :] = EEG
         EEG = padded_EEG
     
@@ -176,7 +177,8 @@ val_Dataloader = DataLoader(
 #
 
 # FINETUNING CODE
-
+#Change for finetuning data?
+data_pathFT = # path to data
 # Extract a subset of training data for fine-tuning
 filesFT = EEGsplit.loc[EEGsplit['split_set']==0, 'file_name'].values
 EEGlenFT = num_partitions.loc[num_partitions['file_name'].isin(filesFT)]
@@ -211,7 +213,7 @@ EEGsplitFT = dl.get_eeg_split_table(
 # TRAINING DATALOADER
 trainsetFT = dl.EEGDataset(
     EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True], transform_function=transformEEG
 )
 trainsamplerFT = dl.EEGSampler(trainsetFT, batchsize, workers)
 trainloaderFT = DataLoader(
@@ -220,7 +222,7 @@ trainloaderFT = DataLoader(
 # VALIDATION DATALOADER
 valsetFT = dl.EEGDataset(
     EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True], transform_function=transformEEG
 )
 valloaderFT = DataLoader(
     dataset=valsetFT, batch_size=batchsize, num_workers=workers, shuffle=False)
@@ -228,7 +230,7 @@ valloaderFT = DataLoader(
 #TEST DATALOADER
 testsetFT = dl.EEGDataset(
     EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True]
+    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True], transform_function=transformEEG
 )
 testloaderFT = DataLoader(dataset = testsetFT, batch_size= batchsize, shuffle=False)
 
