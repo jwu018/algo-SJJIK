@@ -82,14 +82,28 @@ def transformEEG(EEG):
     
     return EEG
 
+# Utility: deterministically select half of files from a flat folder
+def pick_half_files(folder, ext=".edf", seed=42):
+    files = [f for f in os.listdir(folder) if f.lower().endswith(ext)]
+    files.sort()
+    if len(files) == 0:
+        return []
+    rng = np.random.default_rng(seed)
+    k = max(1, len(files) // 4)
+    idx = rng.choice(len(files), size=k, replace=False)
+    idx.sort()
+    return [files[i] for i in idx]
+
 # ​​ Number of partitions
+# Use only half of the EDF files already collected
+half_files = pick_half_files(data_path, ext=".edf", seed=seed)
 
 num_partitions = dl.get_eeg_partition_number(
     data_path,
     freq,
     window,
     overlap,
-    file_format='*.edf',
+    file_format=half_files if len(half_files) > 0 else '*.edf',
     load_function=loadEEG,
     optional_load_fun_args=[False],
     transform_function=transformEEG
@@ -177,11 +191,48 @@ val_Dataloader = DataLoader(
 #
 
 # FINETUNING CODE
-#Change for finetuning data?
-data_pathFT = # path to data
+# Separate finetuning dataset (different source, recursive, BDF)
+ft_root = r"..\finetune"           # set this to your fine-tuning dataset root (nested dirs ok)
+ft_flat = r"..\finetune_collected" # flat copy to keep loaders consistent
+os.makedirs(ft_flat, exist_ok=True)
+
+# Recursively gather BDFs and copy to flat folder with unique names
+for dirpath, dirnames, filenames in os.walk(ft_root):
+    for filename in filenames:
+        if filename.lower().endswith(".bdf"):
+            src = os.path.join(dirpath, filename)
+            dst = os.path.join(ft_flat, filename)
+            if os.path.exists(dst):
+                base, ext = os.path.splitext(filename)
+                c = 1
+                while os.path.exists(dst):
+                    dst = os.path.join(ft_flat, f"{base}_{c}{ext}")
+                    c += 1
+            shutil.copy2(src, dst)
+
+data_pathFT = ft_flat
+
 # Extract a subset of training data for fine-tuning
-filesFT = EEGsplit.loc[EEGsplit['split_set']==0, 'file_name'].values
-EEGlenFT = num_partitions.loc[num_partitions['file_name'].isin(filesFT)]
+filesFT = [f for f in os.listdir(data_pathFT) if f.lower().endswith(".bdf")]
+filesFT.sort()
+
+# BDF loader for FT data
+def loadEEG_FT(path, return_label=False):
+    raw = mne.io.read_raw_bdf(path, preload=True)
+    data = raw.get_data()
+    label = 1 if 'pd' in os.path.basename(path).lower() else 0
+    return (data, label) if return_label else data
+
+EEGlenFT = dl.get_eeg_partition_number(
+    data_pathFT,
+    freq,
+    window,
+    overlap,
+    file_format=filesFT,
+    load_function=loadEEG_FT,
+    optional_load_fun_args=[False],
+    transform_function=transformEEG
+)
 EEGlenFT = EEGlenFT.reset_index().drop(columns=['index'])
 
 def extract_labels_from_files(file_list, data_path):
@@ -189,14 +240,14 @@ def extract_labels_from_files(file_list, data_path):
     for file in file_list:
         full_path = os.path.join(data_path, file)
         try:
-            _, label = loadEEG(full_path, return_label=True)
+            _, label = loadEEG_FT(full_path, return_label=True)
             labels.append(label)
         except Exception as e:
             labels.append(0)
     return np.array(labels)
 
 # Extract labels for the finetuning files
-labels = extract_labels_from_files(filesFT, data_path)
+labels = extract_labels_from_files(filesFT, data_pathFT)
 
 EEGsplitFT = dl.get_eeg_split_table(
     partition_table=EEGlenFT,
@@ -213,7 +264,7 @@ EEGsplitFT = dl.get_eeg_split_table(
 # TRAINING DATALOADER
 trainsetFT = dl.EEGDataset(
     EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True], transform_function=transformEEG
+    label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], transform_function=transformEEG
 )
 trainsamplerFT = dl.EEGSampler(trainsetFT, batchsize, workers)
 trainloaderFT = DataLoader(
@@ -222,7 +273,7 @@ trainloaderFT = DataLoader(
 # VALIDATION DATALOADER
 valsetFT = dl.EEGDataset(
     EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True], transform_function=transformEEG
+    label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], transform_function=transformEEG
 )
 valloaderFT = DataLoader(
     dataset=valsetFT, batch_size=batchsize, num_workers=workers, shuffle=False)
@@ -230,7 +281,7 @@ valloaderFT = DataLoader(
 #TEST DATALOADER
 testsetFT = dl.EEGDataset(
     EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test', supervised=True,
-    label_on_load=True, load_function=loadEEG, optional_load_fun_args=[True], transform_function=transformEEG
+    label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], transform_function=transformEEG
 )
 testloaderFT = DataLoader(dataset = testsetFT, batch_size= batchsize, shuffle=False)
 

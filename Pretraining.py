@@ -23,23 +23,49 @@ class TransformEEGEncoder(nn.Module):
         self.transformer = original_model.transformer
         self.pool_lay = original_model.pool_lay
 
+        # detect d_model from first transformer layer
+        if hasattr(self.transformer, "layers") and len(self.transformer.layers) > 0:
+            self.d_model = self.transformer.layers[0].self_attn.embed_dim
+        else:
+            self.d_model = getattr(self.transformer, "d_model", 128)
+
+        # transformer batch_first flag (default False for nn.TransformerEncoder)
+        self.batch_first = getattr(self.transformer, "batch_first", False)
+
+        # lazy projection will be created on first forward if needed
+        self._proj = None
+
+    def _maybe_init_proj(self, feat_dim: int):
+        if self._proj is None:
+            self._proj = nn.Identity() if feat_dim == self.d_model else nn.Linear(feat_dim, self.d_model)
+
     def forward(self, x):
-        # Token embedding
+        # token_gen usually returns [B, F, S]; ensure 3D
         x = self.token_gen(x)
+        if x.dim() != 3:
+            raise RuntimeError(f"token_gen must return 3D tensor, got {tuple(x.shape)}")
 
-        # Reshape for transformer
-        x = torch.permute(x, [0, 2, 1])  # (batch, seq_len, feature_dim)
+        B, D1, D2 = x.shape
+        # assume longer dim is sequence; convert to [B, S, F]
+        if D2 >= D1:
+            x = x.permute(0, 2, 1)  # [B, S, F]
+            feat_dim = D1
+        else:
+            feat_dim = D2  # already [B, S, F]
 
-        # Transformer encoder
-        x = self.transformer(x)
+        # project to transformer's d_model if needed
+        self._maybe_init_proj(feat_dim)
+        x = self._proj(x)  # [B, S, d_model]
 
-        # Reshape back for pooling
-        x = torch.permute(x, [0, 2, 1])
+        # feed transformer with correct layout
+        if self.batch_first:
+            x = self.transformer(x)  # [B, S, d_model]
+        else:
+            x = self.transformer(x.permute(1, 0, 2)).permute(1, 0, 2)  # [B, S, d_model]
 
-        # Global pooling
-        x = self.pool_lay(x)  # (batch, features, 1)
-        x = x.squeeze(-1)     # (batch, features)
-
+        # pool expects [B, F, S]; convert and pool
+        x = x.permute(0, 2, 1)  # [B, d_model, S]
+        x = self.pool_lay(x).squeeze(-1)  # [B, d_model]
         return x  # Latent representation for SSL
 
 from models import TransformEEG
@@ -50,8 +76,8 @@ from Dataloading_Test import trainloaderFT, valloaderFT, testloaderFT
 #in paper, dataloading has 125 and 250 Hz supported and 16s windows and 0.25 overlap and batch size is 64
 
 # Initialize full model
-baseline = TransformEEG(nb_classes=2, Chan=61, Features=128) #paper has 61 channels
-ssl_backbone = TransformEEG(nb_classes=2, Chan=61, Features=128)
+baseline = TransformEEG(nb_classes=2, Chan=61, Features=244) #paper has 61 channels
+ssl_backbone = TransformEEG(nb_classes=2, Chan=61, Features=244)
 # Wrap encoder
 encoder = TransformEEGEncoder(ssl_backbone)
 
@@ -63,7 +89,7 @@ NNencoder= encoder
 NNencoder2= copy.deepcopy(NNencoder)
 
 # SSL model
-head_size=[ 128, 64, 64]
+head_size=[ 244, 122, 122]
 SelfMdl = selfeeg.ssl.SimCLR(
     encoder=NNencoder, projection_head=head_size).to(device=device)
 
@@ -82,7 +108,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
 loss_info = SelfMdl.fit(
     train_dataloader      = train_Dataloader,
     augmenter             = Augmenter(),
-    epochs                = 300, #paper has 300
+    epochs                = 1, #paper has 300
     optimizer             = optimizer,
     loss_func             = loss,
     loss_args             = loss_arg,
@@ -95,7 +121,7 @@ loss_info = SelfMdl.fit(
 )
 
 #defines the backbone and then sets the pretrained encoder onto the final model
-FinalMdl = TransformEEG(nb_classes=2, Chan=61, Features=128)
+FinalMdl = TransformEEG(nb_classes=2, Chan=61, Features=244)
 #SelfMdl.train()
 #SelfMdl.to(device='cpu') # device moving necessary or not?
 #FinalMdl.encoder = SelfMdl.get_encoder()
@@ -128,7 +154,7 @@ schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.99) #p
 finetuning_loss=selfeeg.ssl.fine_tune(
     model                 = FinalMdl,
     train_dataloader      = trainloaderFT, # for when dataloader is set
-    epochs                = 300,
+    epochs                = 1 , #was 300 changing, for testing
     optimizer             = optimizerFT,
     loss_func             = loss_fineTuning,
     lr_scheduler          = schedulerFT,

@@ -16,7 +16,7 @@ from scipy.stats import zscore
 import selfeeg.augmentation as aug
 from torch.utils.data import DataLoader, Dataset
 from typing import Optional, Union
-from .utilities import GetLrDict, findSeq
+from utilities import GetLrDict, findSeq
 from sklearn.metrics import (
     accuracy_score,
     auc,
