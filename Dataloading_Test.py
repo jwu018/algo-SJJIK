@@ -11,31 +11,58 @@ import selfeeg.dataloading as dl
 import mne
 import shutil
 
-#takes out all the .edf files
-root_folder = r"..\000"
+# Lambda Cloud filesystem paths
+# Replace <FILESYSTEM-NAME> with your actual filesystem name
+FILESYSTEM_NAME = "<FILESYSTEM-NAME>"  # TODO: Update this!
 
-destination = r"..\000_collected"
+root_folder = f"/lambda/nfs/{FILESYSTEM_NAME}/tuh_eeg_data"
+destination = f"/lambda/nfs/{FILESYSTEM_NAME}/eeg_collected"
+ft_root = f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_data"
+ft_flat = f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected"
 
+# Create necessary directories
 os.makedirs(destination, exist_ok=True)
+os.makedirs(ft_flat, exist_ok=True)
 
-for dirpath, dirnames, filenames in os.walk(root_folder):
-    for filename in filenames:
-        # Example: only copy certain file types
-        if filename.endswith(".edf"):
-            full_path = os.path.join(dirpath, filename)
-            dest_path = os.path.join(destination, filename)
+# Function to collect EDF files from any directory structure
+def collect_files(source_dir, dest_dir, file_extension=".edf"):
+    """
+    Recursively collect files with specified extension from source directory
+    and copy them to a flat destination directory.
+    """
+    collected_count = 0
+    
+    if not os.path.exists(source_dir):
+        print(f"Warning: Source directory {source_dir} does not exist")
+        return collected_count
+    
+    for dirpath, dirnames, filenames in os.walk(source_dir):
+        for filename in filenames:
+            if filename.lower().endswith(file_extension):
+                full_path = os.path.join(dirpath, filename)
+                dest_path = os.path.join(dest_dir, filename)
+                
+                # Handle duplicate filenames
+                if os.path.exists(dest_path):
+                    base, ext = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(dest_path):
+                        dest_path = os.path.join(dest_dir, f"{base}_{counter}{ext}")
+                        counter += 1
+                
+                try:
+                    shutil.copy2(full_path, dest_path)
+                    print(f"Copied {full_path} -> {dest_path}")
+                    collected_count += 1
+                except Exception as e:
+                    print(f"Error copying {full_path}: {e}")
+    
+    return collected_count
 
-            # If you want to preserve uniqueness, handle duplicates
-            if os.path.exists(dest_path):
-                base, ext = os.path.splitext(filename)
-                counter = 1
-                while os.path.exists(dest_path):
-                    dest_path = os.path.join(destination, f"{base}_{counter}{ext}")
-                    counter += 1
-
-            shutil.copy2(full_path, dest_path)
-            print(f"Copied {full_path} -> {dest_path}")
-
+# Collect EDF files for main training
+print("Collecting EDF files for training...")
+edf_count = collect_files(root_folder, destination, ".edf")
+print(f"Collected {edf_count} EDF files")
 
 # seed
 seed = 42
@@ -49,7 +76,7 @@ window = 16
 overlap = 0.25
 batchsize = 64
 workers = 0
-data_path = destination# data path here
+data_path = destination
 
 # read EEGs
 def loadEEG(path, return_label=False):
@@ -67,7 +94,7 @@ def loadEEG(path, return_label=False):
     else:
         return data
 
-# idk
+# Channel standardization
 def transformEEG(EEG):
     n_channels = EEG.shape[0]
     Target_Chans = 61
@@ -75,35 +102,40 @@ def transformEEG(EEG):
     if n_channels >= Target_Chans:
         EEG = EEG[:Target_Chans, :]
     else:
-        # If we have fewer than 32 channels, pad with zeros
+        # If we have fewer than 61 channels, pad with zeros
         padded_EEG = np.zeros((Target_Chans, EEG.shape[1]))
         padded_EEG[:n_channels, :] = EEG
         EEG = padded_EEG
     
     return EEG
 
-# Utility: deterministically select half of files from a flat folder
-def pick_half_files(folder, ext=".edf", seed=42):
+# Utility: deterministically select subset of files from a flat folder
+def pick_subset_files(folder, ext=".edf", fraction=0.25, seed=42):
+    """Select a fraction of files from folder"""
     files = [f for f in os.listdir(folder) if f.lower().endswith(ext)]
     files.sort()
     if len(files) == 0:
         return []
     rng = np.random.default_rng(seed)
-    k = max(1, len(files) // 4)
+    k = max(1, int(len(files) * fraction))
     idx = rng.choice(len(files), size=k, replace=False)
     idx.sort()
     return [files[i] for i in idx]
 
-# ​​ Number of partitions
-# Use only half of the EDF files already collected
-half_files = pick_half_files(data_path, ext=".edf", seed=seed)
+# Number of partitions
+# Use only a subset of the EDF files already collected
+subset_files = pick_subset_files(data_path, ext=".edf", fraction=0.25, seed=seed)
+
+if len(subset_files) == 0:
+    print("No EDF files found. Exiting.")
+    exit(1)
 
 num_partitions = dl.get_eeg_partition_number(
     data_path,
     freq,
     window,
     overlap,
-    file_format=half_files if len(half_files) > 0 else '*.edf',
+    file_format=subset_files,
     load_function=loadEEG,
     optional_load_fun_args=[False],
     transform_function=transformEEG
@@ -112,7 +144,7 @@ print(f"Number of partitions available: {num_partitions}")
 
 num_partitions.head()
 
-# ​​ Split data
+# Split data
 EEGsplit = dl.get_eeg_split_table(
     num_partitions,
     test_ratio=0.1,
@@ -121,9 +153,9 @@ EEGsplit = dl.get_eeg_split_table(
     val_split_mode='file',
     exclude_data_id=None,
     stratified=False,
-    perseverance = 5000,
-    split_tolerance = 0.005,
-    seed = seed
+    perseverance=5000,
+    split_tolerance=0.005,
+    seed=seed
 )
 dl.check_split(num_partitions, EEGsplit)
 
@@ -134,14 +166,14 @@ print("EEGsplit columns:", EEGsplit.columns.tolist() if hasattr(EEGsplit, 'colum
 print("EEGsplit head:")
 print(EEGsplit.head() if hasattr(EEGsplit, 'head') else EEGsplit)
 
-# ​​ Create Training Dataset
+# Create Training Dataset
 train_dataset = dl.EEGDataset(
     num_partitions,
     EEGsplit,
     [freq, window, overlap],
-    mode = 'train',
-    load_function = loadEEG,
-    transform_function = transformEEG
+    mode='train',
+    load_function=loadEEG,
+    transform_function=transformEEG
 )
 
 # Create Validation Dataset
@@ -149,140 +181,121 @@ val_dataset = dl.EEGDataset(
     num_partitions,
     EEGsplit,
     [freq, window, overlap],
-    mode = 'validation',
-    load_function = loadEEG,
-    transform_function = transformEEG
+    mode='validation',
+    load_function=loadEEG,
+    transform_function=transformEEG
 )
 
-# get first sample 
-# train_sample_1 = train_dataset[0]
-# print(train_sample_1.shape)
-
-# val_sample_1 = val_dataset[0]
-# print(val_sample_1.shape)
-
-# create samplers
+# Create samplers
 train_sampler = dl.EEGSampler(train_dataset, Mode=0)
 val_sampler = dl.EEGSampler(val_dataset, Mode=0)
 
-# create the dataloader
+# Create the dataloader
 train_Dataloader = DataLoader(
-    dataset = train_dataset,
-    batch_size = batchsize,
-    sampler = train_sampler,
-    num_workers = 0
+    dataset=train_dataset,
+    batch_size=batchsize,
+    sampler=train_sampler,
+    num_workers=0
 )
 
 val_Dataloader = DataLoader(
-    dataset = val_dataset,
-    batch_size = batchsize,
-    sampler = val_sampler,
-    num_workers = 0
+    dataset=val_dataset,
+    batch_size=batchsize,
+    sampler=val_sampler,
+    num_workers=0
 )
 
-# # test
-# for X in train_Dataloader:
-#     print(X.shape)
-#     break
-#
-# for X in val_Dataloader:
-#     print(X.shape)
-#     break
-#
-
 # FINETUNING CODE
-# Separate finetuning dataset (different source, recursive, BDF)
-ft_root = r"..\finetune"           # set this to your fine-tuning dataset root (nested dirs ok)
-ft_flat = r"..\finetune_collected" # flat copy to keep loaders consistent
-os.makedirs(ft_flat, exist_ok=True)
-
-# Recursively gather BDFs and copy to flat folder with unique names
-for dirpath, dirnames, filenames in os.walk(ft_root):
-    for filename in filenames:
-        if filename.lower().endswith(".bdf"):
-            src = os.path.join(dirpath, filename)
-            dst = os.path.join(ft_flat, filename)
-            if os.path.exists(dst):
-                base, ext = os.path.splitext(filename)
-                c = 1
-                while os.path.exists(dst):
-                    dst = os.path.join(ft_flat, f"{base}_{c}{ext}")
-                    c += 1
-            shutil.copy2(src, dst)
+print("\nCollecting BDF files for fine-tuning...")
+bdf_count = collect_files(ft_root, ft_flat, ".bdf")
+print(f"Collected {bdf_count} BDF files")
 
 data_pathFT = ft_flat
 
-# Extract a subset of training data for fine-tuning
+# Extract files for fine-tuning
 filesFT = [f for f in os.listdir(data_pathFT) if f.lower().endswith(".bdf")]
 filesFT.sort()
 
-# BDF loader for FT data
-def loadEEG_FT(path, return_label=False):
-    raw = mne.io.read_raw_bdf(path, preload=True)
-    data = raw.get_data()
-    label = 1 if 'pd' in os.path.basename(path).lower() else 0
-    return (data, label) if return_label else data
+if len(filesFT) == 0:
+    print("No BDF files found for fine-tuning. Skipping fine-tuning setup.")
+else:
+    # BDF loader for FT data
+    def loadEEG_FT(path, return_label=False):
+        raw = mne.io.read_raw_bdf(path, preload=True)
+        data = raw.get_data()
+        label = 1 if 'pd' in os.path.basename(path).lower() else 0
+        return (data, label) if return_label else data
 
-EEGlenFT = dl.get_eeg_partition_number(
-    data_pathFT,
-    freq,
-    window,
-    overlap,
-    file_format=filesFT,
-    load_function=loadEEG_FT,
-    optional_load_fun_args=[False],
-    transform_function=transformEEG
-)
-EEGlenFT = EEGlenFT.reset_index().drop(columns=['index'])
+    EEGlenFT = dl.get_eeg_partition_number(
+        data_pathFT,
+        freq,
+        window,
+        overlap,
+        file_format=filesFT,
+        load_function=loadEEG_FT,
+        optional_load_fun_args=[False],
+        transform_function=transformEEG
+    )
+    EEGlenFT = EEGlenFT.reset_index().drop(columns=['index'])
 
-def extract_labels_from_files(file_list, data_path):
-    labels = []
-    for file in file_list:
-        full_path = os.path.join(data_path, file)
-        try:
-            _, label = loadEEG_FT(full_path, return_label=True)
-            labels.append(label)
-        except Exception as e:
-            labels.append(0)
-    return np.array(labels)
+    def extract_labels_from_files(file_list, data_path):
+        labels = []
+        for file in file_list:
+            full_path = os.path.join(data_path, file)
+            try:
+                _, label = loadEEG_FT(full_path, return_label=True)
+                labels.append(label)
+            except Exception as e:
+                print(f"Error extracting label from {file}: {e}")
+                labels.append(0)
+        return np.array(labels)
 
-# Extract labels for the finetuning files
-labels = extract_labels_from_files(filesFT, data_pathFT)
+    # Extract labels for the finetuning files
+    labels = extract_labels_from_files(filesFT, data_pathFT)
 
-EEGsplitFT = dl.get_eeg_split_table(
-    partition_table=EEGlenFT,
-    test_ratio = 0.2,
-    val_ratio= 0.1,
-    val_ratio_on_all_data=False,
-    stratified=True,
-    labels=labels,
-    split_tolerance=0.001,
-    perseverance=10000,
-    seed=seed
-)
+    EEGsplitFT = dl.get_eeg_split_table(
+        partition_table=EEGlenFT,
+        test_ratio=0.2,
+        val_ratio=0.1,
+        val_ratio_on_all_data=False,
+        stratified=True,
+        labels=labels,
+        split_tolerance=0.001,
+        perseverance=10000,
+        seed=seed
+    )
 
-# TRAINING DATALOADER
-trainsetFT = dl.EEGDataset(
-    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train', supervised=True,
-    label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], transform_function=transformEEG
-)
-trainsamplerFT = dl.EEGSampler(trainsetFT, batchsize, workers)
-trainloaderFT = DataLoader(
-    dataset = trainsetFT, batch_size= batchsize, sampler=trainsamplerFT, num_workers=workers)
+    # TRAINING DATALOADER
+    trainsetFT = dl.EEGDataset(
+        EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train', supervised=True,
+        label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], 
+        transform_function=transformEEG
+    )
+    trainsamplerFT = dl.EEGSampler(trainsetFT, batchsize, workers)
+    trainloaderFT = DataLoader(
+        dataset=trainsetFT, batch_size=batchsize, sampler=trainsamplerFT, num_workers=workers
+    )
 
-# VALIDATION DATALOADER
-valsetFT = dl.EEGDataset(
-    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation', supervised=True,
-    label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], transform_function=transformEEG
-)
-valloaderFT = DataLoader(
-    dataset=valsetFT, batch_size=batchsize, num_workers=workers, shuffle=False)
+    # VALIDATION DATALOADER
+    valsetFT = dl.EEGDataset(
+        EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation', supervised=True,
+        label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], 
+        transform_function=transformEEG
+    )
+    valloaderFT = DataLoader(
+        dataset=valsetFT, batch_size=batchsize, num_workers=workers, shuffle=False
+    )
 
-#TEST DATALOADER
-testsetFT = dl.EEGDataset(
-    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test', supervised=True,
-    label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], transform_function=transformEEG
-)
-testloaderFT = DataLoader(dataset = testsetFT, batch_size= batchsize, shuffle=False)
+    # TEST DATALOADER
+    testsetFT = dl.EEGDataset(
+        EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test', supervised=True,
+        label_on_load=True, load_function=loadEEG_FT, optional_load_fun_args=[True], 
+        transform_function=transformEEG
+    )
+    testloaderFT = DataLoader(
+        dataset=testsetFT, batch_size=batchsize, shuffle=False
+    )
 
-dl.check_split(EEGlenFT, EEGsplitFT, labels)
+    dl.check_split(EEGlenFT, EEGsplitFT, labels)
+    
+print("\nData loading setup complete!")
