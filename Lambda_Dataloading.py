@@ -13,7 +13,7 @@ import shutil
 
 # Lambda Cloud filesystem paths
 # Replace <FILESYSTEM-NAME> with your actual filesystem name
-FILESYSTEM_NAME = "<FILESYSTEM-NAME>"  # TODO: Update this!
+FILESYSTEM_NAME = "<JJIK-EEG>"  # TODO: Update this!
 
 root_folder = f"/lambda/nfs/{FILESYSTEM_NAME}/tuh_eeg_data"
 destination = f"/lambda/nfs/{FILESYSTEM_NAME}/eeg_collected"
@@ -299,3 +299,4 @@ else:
     dl.check_split(EEGlenFT, EEGsplitFT, labels)
     
 print("\nData loading setup complete!")
+
