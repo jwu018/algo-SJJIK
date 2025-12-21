@@ -70,8 +70,8 @@ class TransformEEGEncoder(nn.Module):
 
 from models import TransformEEG
 from TF_augmenter_fix import Augmenter
-from Dataloading_Test import train_Dataloader, val_Dataloader
-from Dataloading_Test import trainloaderFT, valloaderFT, testloaderFT
+from Lambda_Dataloading import train_Dataloader, val_Dataloader
+from Lambda_Dataloading import trainloaderFT, valloaderFT, testloaderFT
 
 #in paper, dataloading has 125 and 250 Hz supported and 16s windows and 0.25 overlap and batch size is 64
 

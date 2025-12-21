@@ -12,8 +12,7 @@ import mne
 import shutil
 
 # Lambda Cloud filesystem paths
-# Replace <FILESYSTEM-NAME> with your actual filesystem name
-FILESYSTEM_NAME = "<JJIK-EEG>"  # TODO: Update this!
+FILESYSTEM_NAME = "JJIK-EEG"  # TODO: Update this!
 
 root_folder = f"/lambda/nfs/{FILESYSTEM_NAME}/tuh_eeg_data"
 destination = f"/lambda/nfs/{FILESYSTEM_NAME}/eeg_collected"
@@ -60,9 +59,10 @@ def collect_files(source_dir, dest_dir, file_extension=".edf"):
     return collected_count
 
 # Collect EDF files for main training
-print("Collecting EDF files for training...")
-edf_count = collect_files(root_folder, destination, ".edf")
-print(f"Collected {edf_count} EDF files")
+#print("Collecting EDF files for training...")
+#Commented out since collected
+# edf_count = collect_files(root_folder, destination, ".edf")
+# print(f"Collected {edf_count} EDF files")
 
 # seed
 seed = 42
@@ -80,19 +80,26 @@ data_path = destination
 
 # read EEGs
 def loadEEG(path, return_label=False):
-    raw = mne.io.read_raw_edf(path, preload=True)
-    data = raw.get_data()
-    
-    # Extract label from filename
-    if 'pd' in os.path.basename(path).lower():
-        label = 1
-    else:
-        label = 0
-    
-    if return_label:
-        return data, label
-    else:
-        return data
+    """
+    Loads EDF files. Assumes path contains 'pd' if it's a Parkinson's case.
+    """
+    try:
+        raw = mne.io.read_raw_edf(path, preload=True, verbose=False)
+        data = raw.get_data()
+        
+        # Extract label from filename
+        if 'pd' in os.path.basename(path).lower():
+            label = 1
+        else:
+            label = 0
+        
+        if return_label:
+            return data, label
+        else:
+            return data
+    except Exception as e:
+        print(f"Error loading {path}: {e}")
+        return None
 
 # Channel standardization
 def transformEEG(EEG):
@@ -124,12 +131,14 @@ def pick_subset_files(folder, ext=".edf", fraction=0.25, seed=42):
 
 # Number of partitions
 # Use only a subset of the EDF files already collected
-subset_files = pick_subset_files(data_path, ext=".edf", fraction=0.25, seed=seed)
+subset_files = pick_subset_files(data_path, ext=".edf", fraction=0.05, seed=seed)
 
 if len(subset_files) == 0:
     print("No EDF files found. Exiting.")
     exit(1)
 
+print(f"Processing {len(subset_files)} files for partition counting...")
+print("This may take several minutes depending on file sizes...")
 num_partitions = dl.get_eeg_partition_number(
     data_path,
     freq,
@@ -191,24 +200,27 @@ train_sampler = dl.EEGSampler(train_dataset, Mode=0)
 val_sampler = dl.EEGSampler(val_dataset, Mode=0)
 
 # Create the dataloader
+# Note: num_workers=0 is safer but slower. On Lambda Cloud, you might increase this (e.g., 4 or 8)
+# if you don't encounter multiprocessing errors with MNE/pickling.
 train_Dataloader = DataLoader(
     dataset=train_dataset,
     batch_size=batchsize,
     sampler=train_sampler,
-    num_workers=0
+    num_workers=workers
 )
 
 val_Dataloader = DataLoader(
     dataset=val_dataset,
     batch_size=batchsize,
     sampler=val_sampler,
-    num_workers=0
+    num_workers=workers
 )
 
 # FINETUNING CODE
-print("\nCollecting BDF files for fine-tuning...")
-bdf_count = collect_files(ft_root, ft_flat, ".bdf")
-print(f"Collected {bdf_count} BDF files")
+#Test later
+# print("\nCollecting BDF files for fine-tuning...")
+# bdf_count = collect_files(ft_root, ft_flat, ".bdf")
+# print(f"Collected {bdf_count} BDF files")
 
 data_pathFT = ft_flat
 
