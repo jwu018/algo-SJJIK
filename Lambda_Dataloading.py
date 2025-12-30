@@ -131,7 +131,7 @@ def pick_subset_files(folder, ext=".edf", fraction=0.25, seed=42):
 
 # Number of partitions
 # Use only a subset of the EDF files already collected
-subset_files = pick_subset_files(data_path, ext=".edf", fraction=0.05, seed=seed)
+subset_files = pick_subset_files(data_path, ext=".edf", fraction=0.001, seed=seed)
 
 if len(subset_files) == 0:
     print("No EDF files found. Exiting.")
@@ -311,4 +311,214 @@ else:
     dl.check_split(EEGlenFT, EEGsplitFT, labels)
     
 print("\nData loading setup complete!")
+
+#Paper's finetuning code - to be tested
+# ==================================
+#  Section 3: create partition list
+# ==================================
+#ds003490 - ID 5 - 3Stim
+ctl_id_5 = [i for i in range(28,51)] + [3,5]
+pds_id_5 = [i for i in range(6,28)]  + [1,2,4]
+part_c = split.create_nested_kfold_subject_split(ctl_id_5, 10, 5)
+part_p = split.create_nested_kfold_subject_split(pds_id_5, 10, 5)
+partition_list_1 = split.merge_partition_lists(part_c, part_p, 10, 5)
+
+#ds002778 - ID 8 - UCSD
+ctl_id_8 = [1, 2, 4, 7,  8, 10, 17, 19, 20, 23, 24, 27, 28, 29, 30, 31]
+pds_id_8 = [3, 5, 6, 9, 11, 12, 13, 14, 15, 16, 18, 21, 22, 25, 26]
+
+ctl_id_8 = [i for i in range(1, 17)]
+pds_id_8 = [i for i in range(17,32)]
+
+part_c = split.create_nested_kfold_subject_split(ctl_id_8, 10, 5)
+part_p = split.create_nested_kfold_subject_split(pds_id_8, 10, 5)
+partition_list_2 = split.merge_partition_lists(part_c, part_p, 10, 5)
+
+#ds004148
+partition_list_3 = split.create_nested_kfold_subject_split(60,10,5)
+
+#ds004584
+pds_id_19 = [i for i in range(1, 101)]
+ctl_id_19 = [i for i in range(101, 141)]
+part_c = split.create_nested_kfold_subject_split(ctl_id_19, 10, 5)
+part_p = split.create_nested_kfold_subject_split(pds_id_19, 10, 5)
+partition_list_4 = split.merge_partition_lists(part_c, part_p, 10, 5)
+# =============================================================================
+# FINE-TUNING DATA
+# =============================================================================
+print_section("FINE-TUNING DATA SETUP")
+
+# Extract files for fine-tuning
+# Skip BDF collection if specified
+if not SKIP_COLLECTION:
+    start_time = time.time()
+    print("Collecting BDF files for fine-tuning...")
+    bdf_count = collect_files(ft_root, ft_flat, ".bdf")
+    print_timing(f"Collected {bdf_count} BDF files", start_time)
+
+data_pathFT = ft_flat
+
+# prepare loadEEG arguments as the scripts do:
+loadEEG_args = {
+    'return_label': True,
+    'downsample': False,
+    #'use_only_original': False,
+    'apply_zscore': True,
+    #TODO: corect Args?
+}
+
+# Set the Dataset ID for glob.glob operation in SelfEEG's GetEEGPartitionNumber().
+# It is a single number for every dataset
+datasetID_1 = '5'  # EEG 3-Stim
+datasetID_2 = '8'  # UC SD
+datasetID_3 = '2'  # Test_Retest_Rest
+datasetID_4 = '19' # PD_EO
+
+glob_input = [
+    datasetID_1 + '_*.pickle',   # only off medication
+    datasetID_2 + '_*.pickle',   # only off medication
+    datasetID_3 + '_*.pickle',   # only eyes open session 1.
+    datasetID_4 + '_*.pickle',   # datasetID_4 have only eyes open
+]
+
+EEGlenFT = dl.get_eeg_partition_number(
+        data_pathFT, freq, window, overlap,
+        file_format             = glob_input,
+        load_function           = loadEEGFT,
+        optional_load_fun_args  = loadEEG_args,
+        includePartial          = False if overlap == 0 else True,
+        verbose                 = False
+)
+
+# Now we also need to load the labels
+loadEEG_args['return_label'] = True
+
+# Set functions to retrieve dataset, subject, and session from each filename.
+# They will be used by GetEEGSplitTable to perform a subject based split
+dataset_id_ex = lambda x: int(x.split(os.sep)[-1].split('_')[0])
+subject_id_ex = lambda x: int(x.split(os.sep)[-1].split('_')[1])
+session_id_ex = lambda x: int(x.split(os.sep)[-1].split('_')[2])
+
+#Inner fold between 1 and 5
+#Outer fold between 1 and 10
+#Both have default 1 on paper code
+outerFold = 1
+innerFold = 1
+
+# fold to eval is the correct index to get the desired train/val/test partition
+foldToEval = outerFold*5 + innerFold
+
+# Now call the GetEEGSplitTable. Since Parkinson task merges two datasets
+# we need to differentiate between this and other tasks
+# Remember: 5 = 3-Stim   &&   8 = UCSD
+train_id = {
+    5: partition_list_1[foldToEval][0],
+    8: partition_list_2[foldToEval][0],
+    2: partition_list_3[foldToEval][0],
+    19: partition_list_4[foldToEval][0],
+}
+val_id = {
+    5: partition_list_1[foldToEval][1],
+    8: partition_list_2[foldToEval][1],
+    2: partition_list_3[foldToEval][1],
+    19: partition_list_4[foldToEval][1],
+}
+test_id = {
+    5: partition_list_1[foldToEval][2],
+    8: partition_list_2[foldToEval][2],
+    2: partition_list_3[foldToEval][2],
+    19: partition_list_4[foldToEval][2],
+}
+EEGsplitFT = dl.get_eeg_split_table(
+    partition_table=EEGlenFT,
+    exclude_data_id=None,
+    val_data_id=val_id,
+    test_data_id=test_id,
+    split_tolerance=0.001,
+    dataset_id_extractor=dataset_id_ex,
+    subject_id_extractor=subject_id_ex,
+    perseverance=10000
+)
+
+# EEGlen and EEGsplit come from their split utilities (see RunSingleTraining)
+trainsetFT = dl.EEGDataset(
+    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'train',
+    supervised=True,
+    label_on_load=True,
+    load_function=loadEEGFT,
+    optional_load_fun_args=loadEEG_args,
+    transform_function=transformEEG
+)
+trainsetFT.preload_dataset()   # fills trainset.x_preload and trainset.y_preload
+
+
+# A boolean that set if EEG data should be transformed
+# with the common spatial pattern.
+#Default in paper is false
+# if csp:
+#     flag_dir = "csp/"
+#     _reset_seed_number(seed)
+#     CSP = CSPScaler(Nfilters=Nfilters, device=device)
+#     data1 = trainset.x_preload[trainset.y_preload == 0].detach().clone().numpy()
+#     data2 = trainset.x_preload[trainset.y_preload == 1].detach().clone().numpy()
+#     CSP.fit(data1, data2)
+#     del data1, data2
+#     Chan = Nfilters * 2
+#     CSPval = copy.deepcopy(CSP)
+#     CSPval._use_torch = False
+#     CSPval.Wcsp = CSPval.Wcsp.detach().cpu().numpy()
+
+valsetFT = dl.EEGDataset(
+    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'validation',
+    supervised=True,
+    label_on_load=True,
+    load_function=loadEEGFT,
+    optional_load_fun_args=loadEEG_args,
+    transform_function=transformEEG
+)
+valsetFT.preload_dataset()
+
+testsetFT = dl.EEGDataset(
+    EEGlenFT, EEGsplitFT, [freq, window, overlap], 'test',
+    supervised=True,
+    label_on_load=True,
+    load_function=loadEEGFT,
+    optional_load_fun_args=loadEEG_args,
+    transform_function=transformEEG
+)
+testsetFT.preload_dataset()
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+trainsetFT.x_preload = trainsetFT.x_preload.to(device=device)
+trainsetFT.y_preload = trainsetFT.y_preload.to(device=device)
+valsetFT.x_preload = valsetFT.x_preload.to(device=device)
+valsetFT.y_preload = valsetFT.y_preload.to(device=device)
+testsetFT.x_preload = testsetFT.x_preload.to(device=device)
+testsetFT.y_preload = testsetFT.y_preload.to(device=device)
+
+# Finally, Define Dataloaders
+# (no need to use more workers in validation and test dataloaders)
+trainloaderFT = DataLoader(
+    dataset=trainsetFT,
+    batch_size=batchsize,
+    shuffle=True,
+    num_workers=NUM_WORKERS
+)
+valloaderFT = DataLoader(
+    dataset=valsetFT,
+    batch_size=batchsize,
+    shuffle=False,
+    num_workers=0
+)
+testloaderFT = DataLoader(
+    dataset=testsetFT,
+    batch_size=batchsize,
+    shuffle=False,
+    num_workers=0
+)
+
+print(f"✓ Fine-tuning dataloaders created")
+print(f"  Training: {len(trainloaderFT)} batches")
+print(f"  Validation: {len(valloaderFT)} batches")
+print(f"  Test: {len(testloaderFT)} batches")
 

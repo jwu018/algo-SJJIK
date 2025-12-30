@@ -68,20 +68,53 @@ class TransformEEGEncoder(nn.Module):
         x = self.pool_lay(x).squeeze(-1)  # [B, d_model]
         return x  # Latent representation for SSL
 
-from models import TransformEEG
-from TF_augmenter_fix import Augmenter
-from Lambda_Dataloading import train_Dataloader, val_Dataloader
-from Lambda_Dataloading import trainloaderFT, valloaderFT, testloaderFT
+print("=" * 60)
+print("PRETRAINING TEST SCRIPT")
+print("=" * 60)
+
+# Import dependencies
+try:
+    from models import TransformEEG
+    from TF_augmenter_fix import Augmenter
+    print("✓ Successfully imported models and augmenter")
+except ImportError as e:
+    print(f"✗ Error importing dependencies: {e}")
+    print("Make sure models.py and TF_augmenter_fix.py are in the same directory")
+
+# Import dataloaders (only pretraining ones)
+# Try optimized version first, fallback to regular version
+try:
+    from Lambda_Dataloading import train_Dataloader, val_Dataloader
+    print("✓ Successfully imported dataloaders (standard version)")
+    print(f"  - Training batches: {len(train_Dataloader)}")
+    print(f"  - Validation batches: {len(val_Dataloader)}")
+except ImportError as e:
+    print(f"✗ Error importing dataloaders: {e}")
+    print("Make sure Lambda_Dataloading.py or Lambda_Dataloading_optimized.py is in the same directory")
+    print("Also check that FILESYSTEM_NAME is correctly set")
+
+# Check GPU availability
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"\n✓ Device: {device}")
+if torch.cuda.is_available():
+    print(f"  - GPU: {torch.cuda.get_device_name(0)}")
+    print(f"  - CUDA Version: {torch.version.cuda}")
+    print(f"  - Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
 #in paper, dataloading has 125 and 250 Hz supported and 16s windows and 0.25 overlap and batch size is 64
+print("\n" + "=" * 60)
+print("INITIALIZING MODELS")
+print("=" * 60)
 
 # Initialize full model
 baseline = TransformEEG(nb_classes=2, Chan=61, Features=244) #paper has 61 channels
 ssl_backbone = TransformEEG(nb_classes=2, Chan=61, Features=244)
+print("✓ Created TransformEEG model (61 channels, 244 features)")
+
 # Wrap encoder
 encoder = TransformEEGEncoder(ssl_backbone)
+print("✓ Created TransformEEGEncoder wrapper")
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Encoder
 NNencoder= encoder
@@ -92,18 +125,25 @@ NNencoder2= copy.deepcopy(NNencoder)
 head_size=[ 244, 122, 122]
 SelfMdl = selfeeg.ssl.SimCLR(
     encoder=NNencoder, projection_head=head_size).to(device=device)
+print(f"✓ Created SimCLR model with projection head {head_size}")
 
 # loss (fit method has a default loss based on the SSL algorithm
 loss=selfeeg.losses.simclr_loss
 loss_arg={'temperature': 0.5}
+print(f"✓ Loss function: SimCLR loss (temperature={loss_arg['temperature']})")
 
 # earlystopper
 earlystop = selfeeg.ssl.EarlyStopping(
     patience=20, min_delta=1e-04, record_best_weights=True)
+print("✓ Early stopping: patience=20, min_delta=1e-04")
+
 # optimizer
 optimizer = torch.optim.Adam(SelfMdl.parameters(), lr=2.5e-5, betas=(0.75,0.999))
+print("✓ Optimizer: Adam (lr=2.5e-5, betas=(0.75, 0.999))")
+
 # lr scheduler
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
+print("✓ LR Scheduler: ExponentialLR (gamma=0.99)")
 
 loss_info = SelfMdl.fit(
     train_dataloader      = train_Dataloader,
@@ -120,6 +160,16 @@ loss_info = SelfMdl.fit(
     return_loss_info      = True
 )
 
+print("\n" + "=" * 60)
+print("PRETRAINING COMPLETED SUCCESSFULLY")
+print("=" * 60)
+
+
+print("\n" + "=" * 60)
+print("PREPARING FOR FINETUNING")
+print("=" * 60)
+
+from Lambda_Dataloading import trainloaderFT, valloaderFT, testloaderFT
 #defines the backbone and then sets the pretrained encoder onto the final model
 FinalMdl = TransformEEG(nb_classes=2, Chan=61, Features=244)
 #SelfMdl.train()
@@ -154,7 +204,7 @@ schedulerFT = torch.optim.lr_scheduler.ExponentialLR(optimizerFT, gamma=0.99) #p
 finetuning_loss=selfeeg.ssl.fine_tune(
     model                 = FinalMdl,
     train_dataloader      = trainloaderFT, # for when dataloader is set
-    epochs                = 1 , #was 300 changing, for testing
+    epochs                = 1 , #was 300 changing for testing
     optimizer             = optimizerFT,
     loss_func             = loss_fineTuning,
     lr_scheduler          = schedulerFT,
@@ -228,7 +278,7 @@ if not verbose:
     print(f'Balanced accuracy on windows with threshold {th:.3f} --> {bal_acc_roc:.3f}')
 
 # Evalutate the model on the subject level
-#Maybe take out the subject level on 0.5 threshold
+# Maybe take out the subject level on 0.5 threshold
 # for window vs subject: - Window-level evaluation: How well the model classifies individual windows/segments.
 # - Subject-level evaluation: How well the model decides the final label for a subject by aggregating its windows.
 # - the clinical/real label is per subject. Window-level is a proxy.

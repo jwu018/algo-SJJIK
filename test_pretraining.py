@@ -92,24 +92,14 @@ def main():
     # Import dataloaders (only pretraining ones)
     # Try optimized version first, fallback to regular version
     try:
-        from Lambda_Dataloading_optimized import train_Dataloader, val_Dataloader
-        print("✓ Successfully imported dataloaders (OPTIMIZED VERSION)")
+        from Lambda_Dataloading import train_Dataloader, val_Dataloader
+        print("✓ Successfully imported dataloaders (standard version)")
         print(f"  - Training batches: {len(train_Dataloader)}")
         print(f"  - Validation batches: {len(val_Dataloader)}")
-    except ImportError:
-        try:
-            from Lambda_Dataloading import train_Dataloader, val_Dataloader
-            print("✓ Successfully imported dataloaders (standard version)")
-            print(f"  - Training batches: {len(train_Dataloader)}")
-            print(f"  - Validation batches: {len(val_Dataloader)}")
-        except ImportError as e:
-            print(f"✗ Error importing dataloaders: {e}")
-            print("Make sure Lambda_Dataloading.py or Lambda_Dataloading_optimized.py is in the same directory")
-            print("Also check that FILESYSTEM_NAME is correctly set")
-            return
-    except Exception as e:
-        print(f"✗ Error loading data: {e}")
-        print("Check that your data paths are correct and files exist")
+    except ImportError as e:
+        print(f"✗ Error importing dataloaders: {e}")
+        print("Make sure Lambda_Dataloading.py or Lambda_Dataloading_optimized.py is in the same directory")
+        print("Also check that FILESYSTEM_NAME is correctly set")
         return
 
     # Check GPU availability

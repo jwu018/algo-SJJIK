@@ -52,7 +52,7 @@ FORCE_RECALCULATE = False  # Force recalculation even if cache exists
 NUM_WORKERS = 0  # Increase for faster data loading during training
 
 # Parallel processing for partition counting
-USE_PARALLEL_PARTITION_COUNTING = True  # Use all CPU cores for first-time setup
+USE_PARALLEL_PARTITION_COUNTING = False  # DISABLED - use sequential for reliability
 MAX_PARALLEL_WORKERS = None  # None = use all CPU cores, or specify number
 
 # =============================================================================
@@ -265,6 +265,60 @@ def get_partition_table_parallel(data_path, file_list, freq, window, overlap, ma
 
     return df
 
+def get_partition_table_sequential(data_path, file_list, freq, window, overlap):
+    """
+    Calculate partition table sequentially with verbose progress.
+    Slower than parallel but more reliable and shows progress.
+    """
+    print(f"Using sequential processing (more reliable, shows progress)...")
+    print(f"Processing {len(file_list)} files...")
+    print()
+
+    results = []
+    start_time = time.time()
+
+    for i, filepath in enumerate(file_list):
+        file_start = time.time()
+        full_path = os.path.join(data_path, filepath)
+
+        try:
+            duration, n_channels, sfreq = loadEEG_metadata_only(full_path)
+
+            if duration is not None:
+                n_partitions = calculate_num_windows(duration, window, overlap)
+                results.append({
+                    'file': filepath,
+                    'n_partitions': n_partitions,
+                    'duration': duration,
+                    'n_channels': n_channels,
+                    'sfreq': sfreq
+                })
+
+                file_time = time.time() - file_start
+                elapsed = time.time() - start_time
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                remaining = (len(file_list) - i - 1) / rate if rate > 0 else 0
+
+                # Print progress every file
+                print(f"[{i+1:3d}/{len(file_list):3d}] "
+                      f"{filepath[:45]:45s} | "
+                      f"{n_partitions:4d} partitions | "
+                      f"{file_time:5.2f}s | "
+                      f"Rate: {rate:.1f}/sec | "
+                      f"ETA: {remaining/60:.1f}min")
+            else:
+                print(f"[{i+1:3d}/{len(file_list):3d}] SKIPPED: {filepath[:45]:45s} (load failed)")
+
+        except Exception as e:
+            print(f"[{i+1:3d}/{len(file_list):3d}] ERROR: {filepath[:45]:45s} - {str(e)[:40]}")
+
+    print_timing(f"Processed {len(file_list)} files sequentially", start_time)
+
+    # Convert to DataFrame
+    df = pd.DataFrame(results)
+    df = df.rename(columns={'file': 'File', 'n_partitions': 'N'})
+    return df
+
 # =============================================================================
 # PARTITION CACHING
 # =============================================================================
@@ -417,18 +471,10 @@ if num_partitions is None:
             print("Falling back to sequential processing...")
             num_partitions = None
 
-    # Fallback to selfeeg's built-in method
+    # Use custom sequential method with progress
     if num_partitions is None:
-        print("Using selfeeg's built-in partition counting (sequential)...")
-        num_partitions = dl.get_eeg_partition_number(
-            data_path,
-            freq,
-            window,
-            overlap,
-            file_format=subset_files,
-            load_function=loadEEG,
-            optional_load_fun_args=[False],
-            transform_function=transformEEG
+        num_partitions = get_partition_table_sequential(
+            data_path, subset_files, freq, window, overlap
         )
 
     print_timing("Partition table calculation completed", start_time)
@@ -590,6 +636,7 @@ partition_list_4 = split.merge_partition_lists(part_c, part_p, 10, 5)
 # =============================================================================
 print_section("FINE-TUNING DATA SETUP")
 
+# Extract files for fine-tuning
 # Skip BDF collection if specified
 if not SKIP_COLLECTION:
     start_time = time.time()
@@ -598,8 +645,6 @@ if not SKIP_COLLECTION:
     print_timing(f"Collected {bdf_count} BDF files", start_time)
 
 data_pathFT = ft_flat
-# Extract files for fine-tuning
-filesFT = #TODO:Specific files?
 
 # prepare loadEEG arguments as the scripts do:
 loadEEG_args = {
