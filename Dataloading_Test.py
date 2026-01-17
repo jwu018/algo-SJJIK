@@ -11,6 +11,22 @@ import selfeeg.dataloading as dl
 import mne
 import shutil
 
+# ADDED (minimal, required for preprocessing)
+from scipy.signal import butter, filtfilt
+from scipy.stats import zscore
+
+
+# ADDED (minimal helper)
+def bandpass_and_zscore(data, fs, low=0.5, high=40, order=4):
+    nyq = 0.5 * fs
+    b, a = butter(order, [low / nyq, high / nyq], btype='band')
+    if data.shape[1] >= 3 * max(len(a), len(b)):
+        data = filtfilt(b, a, data, axis=1)
+    data = np.nan_to_num(data)
+    data = zscore(data, axis=1)
+    return data
+
+
 #takes out all the .edf files
 root_folder = r"..\000"
 
@@ -55,6 +71,10 @@ data_path = destination# data path here
 def loadEEG(path, return_label=False):
     raw = mne.io.read_raw_edf(path, preload=True)
     data = raw.get_data()
+
+    # ADDED (minimal preprocessing)
+    fs = int(raw.info['sfreq'])
+    data = bandpass_and_zscore(data, fs)
     
     # Extract label from filename
     if 'pd' in os.path.basename(path).lower():
@@ -220,6 +240,11 @@ filesFT.sort()
 def loadEEG_FT(path, return_label=False):
     raw = mne.io.read_raw_bdf(path, preload=True)
     data = raw.get_data()
+
+    # ADDED (minimal preprocessing)
+    fs = int(raw.info['sfreq'])
+    data = bandpass_and_zscore(data, fs)
+
     label = 1 if 'pd' in os.path.basename(path).lower() else 0
     return (data, label) if return_label else data
 
