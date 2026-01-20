@@ -342,40 +342,41 @@ val_Dataloader = DataLoader(
 DATASETS = [
     {
         "name": "3-Stim",
-        "root_dir": "/lambda/nfs/JJIK-EEG/finetuning_datasets/ds003490",
-        "output_dir": "/lambda/nfs/JJIK-EEG/finetune_collected",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds003490",
+        "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 5,
     },
     {
         "name": "UCSD",
-        "root_dir": "/lambda/nfs/JJIK-EEG/finetuning_datasets/ds002778",
-        "output_dir": "/lambda/nfs/JJIK-EEG/finetune_collected",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds002778",
+        "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 8,
     },
     {
         "name": "Test-Retest",
-        "root_dir": "/lambda/nfs/JJIK-EEG/finetuning_datasets/ds004148",
-        "output_dir": "/lambda/nfs/JJIK-EEG/finetune_collected",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds004148",
+        "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 2,
     },
     {
         "name": "PD EO",
-        "root_dir": "/lambda/nfs/JJIK-EEG/finetuning_datasets/ds004584",
-        "output_dir": "/lambda/nfs/JJIK-EEG/finetune_collected",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds004584",
+        "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 19,
     },
 ]
 
-DRY_RUN = False   # set True to test without writing files
+DRY_RUN = True   # set True to test without writing files
 
-SUPPORTED_EXTS = (".bdf", ".bdt", ".set")
+SUPPORTED_EXTS = (".bdf", ".bdt", ".set", ".vhdr")
 
 # ============================================================
 # REGEX DEFINITIONS
 # ============================================================
 
 SUBJECT_RE = re.compile(r"sub-[a-z]*?(\d+)", re.IGNORECASE)
-SESSION_RE = re.compile(r"ses[-_]?(\d+)", re.IGNORECASE)
+# supports: ses-01  |  ses-session1
+SESSION_RE = re.compile(r"ses-(?:session)?(\d+)", re.IGNORECASE)
 TRIAL_RE   = re.compile(r"trial[-_]?(\d+)", re.IGNORECASE)
 
 # ============================================================
@@ -399,8 +400,13 @@ def load_raw_any(path: str):
 
     if ext in [".bdf", ".bdt"]:
         return mne.io.read_raw_bdf(path, preload=True, verbose=False)
+
     elif ext == ".set":
         return mne.io.read_raw_eeglab(path, preload=True, verbose=False)
+
+    elif ext == ".vhdr":
+        return mne.io.read_raw_brainvision(path, preload=True, verbose=False)
+
     else:
         raise ValueError(f"Unsupported EEG format: {ext}")
 
@@ -423,6 +429,10 @@ def convert_dataset(dataset_cfg):
             if not fname.lower().endswith(SUPPORTED_EXTS):
                 continue
 
+            # Only load BrainVision via .vhdr
+            if fname.lower().endswith((".eeg", ".vmrk")):
+                continue
+
             full_path = os.path.join(dirpath, fname)
             name = fname.lower()
 
@@ -432,8 +442,8 @@ def convert_dataset(dataset_cfg):
                 continue
 
             session_id = extract_or_default(SESSION_RE, name, 1)
-            trial_id   = extract_or_default(TRIAL_RE, name, 1)
-            group      = extract_group(name)
+            trial_id = extract_or_default(TRIAL_RE, name, 1)
+            group = extract_group(name)
 
             try:
                 raw = load_raw_any(full_path)
@@ -662,7 +672,7 @@ trainloaderFT = DataLoader(
     dataset=trainsetFT,
     batch_size=batchsize,
     shuffle=True,
-    num_workers=NUM_WORKERS
+    num_workers=workers
 )
 valloaderFT = DataLoader(
     dataset=valsetFT,
