@@ -15,9 +15,12 @@ import split
 import pickle
 import re
 from typing import Optional
+from scipy.signal import butter, filtfilt
+from scipy.stats import zscore
+
 
 # Lambda Cloud filesystem paths
-FILESYSTEM_NAME = "JJIK-EEG"  # TODO: Update this!
+FILESYSTEM_NAME = "Algoverse"  # TODO: Update this!
 
 root_folder = f"/lambda/nfs/{FILESYSTEM_NAME}/tuh_eeg_data"
 destination = f"/lambda/nfs/{FILESYSTEM_NAME}/eeg_collected"
@@ -83,6 +86,16 @@ batchsize = 64
 workers = 0
 data_path = destination
 
+def bandpass_and_zscore(data, fs, low=0.5, high=40, order=4):
+    nyq = 0.5 * fs
+    b, a = butter(order, [low / nyq, high / nyq], btype='band')
+    if data.shape[1] >= 3 * max(len(a), len(b)):
+        data = filtfilt(b, a, data, axis=1)
+    data = np.nan_to_num(data)
+    data = zscore(data, axis=1)
+    return data
+
+
 # read EEGs
 def loadEEG(path, return_label=False):
     """
@@ -91,13 +104,14 @@ def loadEEG(path, return_label=False):
     try:
         raw = mne.io.read_raw_edf(path, preload=True, verbose=False)
         data = raw.get_data()
-        
+        fs = int(raw.info['sfreq'])
+        data = bandpass_and_zscore(data, fs)
         # Extract label from filename
         if 'pd' in os.path.basename(path).lower():
             label = 1
         else:
             label = 0
-        
+
         if return_label:
             return data, label
         else:
