@@ -162,6 +162,37 @@ loss_info = SelfMdl.fit(
     return_loss_info      = True
 )
 
+# ============================
+# SAVE PRETRAINED ENCODER
+# ============================
+import os, time
+
+run_dir = f"/lambda/nfs/Algoverse/runs/pretrain_{time.strftime('%Y%m%d_%H%M%S')}"
+os.makedirs(run_dir, exist_ok=True)
+
+# Save only the encoder (what you actually need later)
+encoder_path = os.path.join(run_dir, "encoder.pth")
+torch.save(SelfMdl.get_encoder().state_dict(), encoder_path)
+
+# (Optional but recommended) Save a full checkpoint for reproducibility/resume
+checkpoint_path = os.path.join(run_dir, "checkpoint.pt")
+torch.save({
+    "encoder_state_dict": SelfMdl.get_encoder().state_dict(),
+    "projection_head_state_dict": SelfMdl.projection_head.state_dict(),
+    "optimizer_state_dict": optimizer.state_dict(),
+    "scheduler_state_dict": scheduler.state_dict(),
+    "loss_info": loss_info,
+    "epochs": 1,  # change if you change epochs below
+    "seed": 42,
+    "freq": 250,
+    "window": 16,
+    "overlap": 0.25,
+    "batchsize": 64,
+    "temperature": loss_arg["temperature"],
+}, checkpoint_path)
+
+# END SAVE CODE
+
 print("\n" + "=" * 60)
 print(f"✓ Pretrained encoder saved to: {encoder_path}")
 print(f"✓ Full checkpoint saved to:   {checkpoint_path}")
