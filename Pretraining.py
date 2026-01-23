@@ -167,14 +167,27 @@ loss_info = SelfMdl.fit(
 # ============================
 import os, time
 
-run_dir = f"/lambda/nfs/Algoverse/runs/pretrain_{time.strftime('%Y%m%d_%H%M%S')}"
+run_dir = f"/lambda/nfs/{FILESYSTEM_NAME}/runs/pretrain_{time.strftime('%Y%m%d_%H%M%S')}"
 os.makedirs(run_dir, exist_ok=True)
+
+# Get training statistics
+actual_epochs = len(loss_info['train_loss']) if isinstance(loss_info, dict) and 'train_loss' in loss_info else 300
+
+# Try to get best epoch from early stopping
+best_epoch = actual_epochs  # default to last epoch
+if hasattr(earlystop, 'best_epoch'):
+    best_epoch = earlystop.best_epoch
+    print(f"\n✓ Early stopping triggered at epoch {actual_epochs}")
+    print(f"✓ Best weights from epoch {best_epoch}")
+elif actual_epochs < 300:
+    print(f"\n✓ Training stopped early at epoch {actual_epochs}")
 
 # Save only the encoder (what you actually need later)
 encoder_path = os.path.join(run_dir, "encoder.pth")
 torch.save(SelfMdl.get_encoder().state_dict(), encoder_path)
+print(f"✓ Encoder saved to: {encoder_path}")
 
-# (Optional but recommended) Save a full checkpoint for reproducibility/resume
+# Save a full checkpoint for reproducibility/resume
 checkpoint_path = os.path.join(run_dir, "checkpoint.pt")
 torch.save({
     "encoder_state_dict": SelfMdl.get_encoder().state_dict(),
@@ -182,27 +195,35 @@ torch.save({
     "optimizer_state_dict": optimizer.state_dict(),
     "scheduler_state_dict": scheduler.state_dict(),
     "loss_info": loss_info,
-    "epochs": 1,  # change if you change epochs below
-    "seed": 42,
-    "freq": 250,
-    "window": 16,
-    "overlap": 0.25,
-    "batchsize": 64,
+    "epochs_trained": actual_epochs,
+    "best_epoch": best_epoch,
+    "seed": seed,
+    "freq": freq,
+    "window": window,
+    "overlap": overlap,
+    "batchsize": batchsize,
     "temperature": loss_arg["temperature"],
+    "model_config": {
+        "nb_classes": 2,
+        "Chan": 61,
+        "Features": 244,
+    }
 }, checkpoint_path)
+print(f"✓ Full checkpoint saved to: {checkpoint_path}")
 
-# END SAVE CODE
-
-print("\n" + "=" * 60)
-print(f"✓ Pretrained encoder saved to: {encoder_path}")
-print(f"✓ Full checkpoint saved to:   {checkpoint_path}")
-print("=" * 60)
-
+# Also save training metrics separately for easy analysis
+metrics_path = os.path.join(run_dir, "training_metrics.pt")
+torch.save(loss_info, metrics_path)
+print(f"✓ Training metrics saved to: {metrics_path}")
 
 print("\n" + "=" * 60)
 print("PRETRAINING COMPLETED SUCCESSFULLY")
 print("=" * 60)
-
+print(f"Output directory: {run_dir}")
+print(f"Epochs trained: {actual_epochs}")
+if best_epoch != actual_epochs:
+    print(f"Best epoch: {best_epoch}")
+print("=" * 60)
 
 print("\n" + "=" * 60)
 
