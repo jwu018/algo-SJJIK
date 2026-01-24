@@ -342,25 +342,25 @@ val_Dataloader = DataLoader(
 DATASETS = [
     {
         "name": "3-Stim",
-        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds003490",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning/ds003490",
         "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 5,
     },
     {
         "name": "UCSD",
-        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds002778",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning/ds002778",
         "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 8,
     },
     {
         "name": "Test-Retest",
-        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds004148",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning/ds004148",
         "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 2,
     },
     {
         "name": "PD EO",
-        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning_datasets/ds004584",
+        "root_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetuning/ds004584",
         "output_dir": f"/lambda/nfs/{FILESYSTEM_NAME}/finetune_collected",
         "dataset_id": 19,
     },
