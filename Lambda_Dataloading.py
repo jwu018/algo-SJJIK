@@ -83,7 +83,7 @@ freq = 250
 window = 16
 overlap = 0.25
 batchsize = 64
-workers = 0
+workers = 4
 data_path = destination
 
 def bandpass_and_zscore(data, fs, low=0.5, high=40, order=4):
@@ -691,4 +691,5 @@ print(f"✓ Fine-tuning dataloaders created")
 print(f"  Training: {len(trainloaderFT)} batches")
 print(f"  Validation: {len(valloaderFT)} batches")
 print(f"  Test: {len(testloaderFT)} batches")
+
 
