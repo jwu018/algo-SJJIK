@@ -62,29 +62,29 @@ class Augmenter(nn.Module):
         self.use_time_mix = use_time_mix
         self.use_freq_mix = use_freq_mix
         self.use_crop = use_crop
-        self.p = p  # probability of applying each augmentation
+        self.p = p
 
     def forward(self, x, x_alt=None):
-        """
-        x: [B, C, T] batch of EEG trials
-        x_alt: [B, C, T] optional second batch (same shape) for mix-based augmentations
-        """
-        # 1) Trial averaging
-        if self.use_trial_avg and x_alt is not None and torch.rand(1) < self.p:
+        # If SimCLR doesn't provide x_alt, make one by shuffling within batch
+        if x_alt is None:
+            perm = torch.randperm(x.size(0), device=x.device)
+            x_alt = x[perm]
+
+        # Now mix augmentations actually can run
+        if self.use_trial_avg and torch.rand(1, device=x.device) < self.p:
             x = trial_averaging(x, x_alt)
 
-        # 2) Time slice mixing
-        if self.use_time_mix and x_alt is not None and torch.rand(1) < self.p:
+        if self.use_time_mix and torch.rand(1, device=x.device) < self.p:
             x = time_slice_mix(x, x_alt)
 
-        # 3) Frequency domain mixing
-        if self.use_freq_mix and x_alt is not None and torch.rand(1) < self.p:
+        if self.use_freq_mix and torch.rand(1, device=x.device) < self.p:
             x = frequency_mix(x, x_alt)
 
-        # 4) Random cropping
-        if self.use_crop and torch.rand(1) < self.p:
+        if self.use_crop and torch.rand(1, device=x.device) < self.p:
             x = random_crop(x)
 
         return x
+
+
 
 
