@@ -150,7 +150,7 @@ def pick_subset_files(folder, ext=".edf", fraction=0.25, seed=42):
 
 # Number of partitions
 # Use only a subset of the EDF files already collected
-subset_files = pick_subset_files(data_path, ext=".edf", fraction=0.001, seed=seed)
+subset_files = pick_subset_files(data_path, ext=".edf", fraction=1.0, seed=seed)
 
 if len(subset_files) == 0:
     print("No EDF files found. Exiting.")
@@ -691,5 +691,6 @@ print(f"✓ Fine-tuning dataloaders created")
 print(f"  Training: {len(trainloaderFT)} batches")
 print(f"  Validation: {len(valloaderFT)} batches")
 print(f"  Test: {len(testloaderFT)} batches")
+
 
 
