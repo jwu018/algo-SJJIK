@@ -136,8 +136,8 @@ print(f"✓ Loss function: SimCLR loss (temperature={loss_arg['temperature']})")
 
 # earlystopper
 earlystop = selfeeg.ssl.EarlyStopping(
-    patience=20, min_delta=1e-04, record_best_weights=True)
-print("✓ Early stopping: patience=20, min_delta=1e-04")
+    patience=30, min_delta=1e-04, record_best_weights=True)
+print("✓ Early stopping: patience=30, min_delta=1e-04")
 
 # optimizer
 optimizer = torch.optim.Adam(SelfMdl.parameters(), lr=2.5e-5, betas=(0.75,0.999))
