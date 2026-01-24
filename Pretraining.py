@@ -33,14 +33,14 @@ class TransformEEGEncoder(nn.Module):
         self.transformer = original_model.transformer
         self.pool_lay = original_model.pool_lay
 
-        # detect d_model from first transformer layer
+        # detect d_model and batch_first from first transformer layer
         if hasattr(self.transformer, "layers") and len(self.transformer.layers) > 0:
-            self.d_model = self.transformer.layers[0].self_attn.embed_dim
+            layer0 = self.transformer.layers[0]
+            self.d_model = layer0.self_attn.embed_dim
+            self.batch_first = getattr(layer0, "batch_first", False)
         else:
             self.d_model = getattr(self.transformer, "d_model", 128)
-
-        # transformer batch_first flag (default False for nn.TransformerEncoder)
-        self.batch_first = getattr(self.transformer, "batch_first", False)
+            self.batch_first = False
 
         # lazy projection will be created on first forward if needed
         self._proj = None
@@ -50,18 +50,14 @@ class TransformEEGEncoder(nn.Module):
             self._proj = nn.Identity() if feat_dim == self.d_model else nn.Linear(feat_dim, self.d_model)
 
     def forward(self, x):
-        # token_gen usually returns [B, F, S]; ensure 3D
+        # token_gen expects [B, C, T] and returns [B, F, S]
         x = self.token_gen(x)
         if x.dim() != 3:
             raise RuntimeError(f"token_gen must return 3D tensor, got {tuple(x.shape)}")
 
-        B, D1, D2 = x.shape
-        # assume longer dim is sequence; convert to [B, S, F]
-        if D2 >= D1:
-            x = x.permute(0, 2, 1)  # [B, S, F]
-            feat_dim = D1
-        else:
-            feat_dim = D2  # already [B, S, F]
+        # token_gen output is always [B, F, S]
+        feat_dim = x.shape[1]       # F
+        x = x.permute(0, 2, 1)      # [B, S, F]
 
         # project to transformer's d_model if needed
         self._maybe_init_proj(feat_dim)
