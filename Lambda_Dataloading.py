@@ -1,3 +1,4 @@
+
 # imports
 import os
 import random
@@ -488,8 +489,6 @@ else:
     print("\n(Skipping fine-tuning dataset conversion: DO_CONVERT_FT=False)")
 
 
-print("\n✓ All datasets processed")
-
 def print_section(title):
     """Print a formatted section header"""
     print("\n" + "=" * 70)
@@ -702,10 +701,12 @@ else:
     trainloaderFT = valloaderFT = testloaderFT = None
     print("(Skipping fine-tuning dataloaders: DO_FINETUNE=False)")
 
+if trainloaderFT is not None:
+    print(f"  Training: {len(trainloaderFT)} batches")
+    print(f"  Validation: {len(valloaderFT)} batches")
+    print(f"  Test: {len(testloaderFT)} batches")
 
-print(f"  Training: {len(trainloaderFT)} batches")
-print(f"  Validation: {len(valloaderFT)} batches")
-print(f"  Test: {len(testloaderFT)} batches")
+
 
 
 
